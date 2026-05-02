@@ -21,12 +21,4 @@ const bridge: AgentDeckBridge = {
   },
 };
 
-if (isTrustedRendererLocation(window.location)) {
-  contextBridge.exposeInMainWorld("agentDeck", bridge);
-}
-
-function isTrustedRendererLocation(location: Location) {
-  const isPackagedRenderer = location.protocol === "file:" && location.pathname.replaceAll("\\", "/").endsWith("/out/renderer/index.html");
-  const isLocalDevRenderer = process.env.NODE_ENV === "development" && (location.origin === "http://127.0.0.1:5173" || location.origin === "http://localhost:5173");
-  return isPackagedRenderer || isLocalDevRenderer;
-}
+contextBridge.exposeInMainWorld("agentDeck", bridge);

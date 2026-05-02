@@ -270,19 +270,26 @@ button {
 
 .terminal-pane__body {
   color: #aab2bd;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.62;
   min-height: 0;
   overflow: hidden;
 }
 
 .terminal-emulator {
   height: 100%;
+  line-height: normal;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
   padding: 8px 10px;
+}
+
+.terminal-emulator .xterm {
+  height: 100%;
+}
+
+.terminal-emulator .xterm-viewport,
+.terminal-emulator .xterm-screen {
+  font-feature-settings: "liga" 0, "calt" 0;
 }
 
 .terminal-emulator--empty {

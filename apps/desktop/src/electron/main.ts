@@ -232,7 +232,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: join(__dirname, "../preload/preload.mjs"),
-      sandbox: true,
+      sandbox: false,
     },
     width: 1320,
   });
@@ -263,7 +263,9 @@ app.whenReady().then(() => {
 
   if (process.env.AGENTDECK_SMOKE_TEST === "1") {
     const fallbackTimer = setTimeout(() => app.quit(), 5_000);
-    window.webContents.once("did-finish-load", () => {
+    window.webContents.once("did-finish-load", async () => {
+      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.terminal)");
+      console.log(`AgentDeck preload bridge: ${hasBridge ? "available" : "missing"}`);
       setTimeout(() => {
         clearTimeout(fallbackTimer);
         app.quit();
