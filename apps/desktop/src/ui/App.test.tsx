@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -125,6 +125,60 @@ describe("App", () => {
     expect(closeSession).toHaveBeenCalledWith("term-5");
   });
 
+  test("renames a terminal from the context menu", () => {
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("Builder");
+    render(<App />);
+
+    fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+
+    expect(prompt).toHaveBeenCalledWith("Rename terminal", "OpenCode");
+    expect(screen.getByLabelText("Builder terminal")).toBeTruthy();
+  });
+
+  test("saves the current workspace through the bridge", async () => {
+    const savedDocuments: unknown[] = [];
+    const saveWorkspace = vi.fn((document: unknown) => {
+      savedDocuments.push(document);
+      return Promise.resolve(true);
+    });
+    window.agentDeck = createFakeBridge({ workspace: { importWorkspace: () => Promise.resolve(null), saveWorkspace } });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
+    expect(savedDocuments[0]).toMatchObject({ name: "AgentDeck Workspace", version: 1, nextTerminalIndex: 5 });
+  });
+
+  test("imports a workspace and closes existing sessions", async () => {
+    const closeSession = vi.fn(() => Promise.resolve(true));
+    window.agentDeck = createFakeBridge({
+      closeSession,
+      workspace: {
+        importWorkspace: () =>
+          Promise.resolve({
+            layout: { id: "term-9", type: "terminal" },
+            name: "Imported",
+            nextTerminalIndex: 10,
+            panes: {
+              "term-9": { command: "shell", detail: "imported", id: "term-9", status: "ready", title: "Imported Shell", tone: "neutral" },
+            },
+            version: 1,
+          }),
+        saveWorkspace: () => Promise.resolve(true),
+      },
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Import workspace" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Imported Shell terminal")).toBeTruthy());
+    expect(screen.queryByLabelText("OpenCode terminal")).toBeNull();
+    expect(closeSession).toHaveBeenCalledWith("term-1");
+    expect(closeSession).toHaveBeenCalledWith("term-4");
+  });
+
   test("opens and dismisses the terminal menu from the keyboard", () => {
     render(<App />);
 
@@ -236,7 +290,8 @@ function findSplitSizes(node: typeof initialSplitLayout, id: string): number[] |
   return undefined;
 }
 
-function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> = {}): NonNullable<Window["agentDeck"]> {
+function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> & { workspace?: NonNullable<Window["agentDeck"]>["workspace"] } = {}): NonNullable<Window["agentDeck"]> {
+  const { workspace, ...terminalOverrides } = overrides;
   return {
     terminal: {
       closeSession: () => Promise.resolve(true),
@@ -245,7 +300,11 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
       onExit: () => () => undefined,
       resize: () => Promise.resolve(true),
       write: () => Promise.resolve(true),
-      ...overrides,
+      ...terminalOverrides,
+    },
+    workspace: workspace ?? {
+      importWorkspace: () => Promise.resolve(null),
+      saveWorkspace: () => Promise.resolve(true),
     },
   };
 }

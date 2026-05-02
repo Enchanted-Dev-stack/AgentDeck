@@ -1,5 +1,6 @@
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
-import { getTerminalBridge } from "../terminal/bridge.js";
+import { getTerminalBridge, getWorkspaceBridge } from "../terminal/bridge.js";
+import { createWorkspaceDocument } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 import { TerminalEmulator } from "./TerminalEmulator.js";
 
@@ -43,6 +44,7 @@ interface MenuPosition {
 
 const MIN_PANE_WIDTH = 220;
 const MIN_PANE_HEIGHT = 140;
+const MAX_PANE_TITLE_LENGTH = 80;
 
 const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
   { id: "terminal", label: "Terminal", icon: "terminal" },
@@ -108,6 +110,7 @@ export function App() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [selectedTerminalIds, setSelectedTerminalIds] = useState<Set<string>>(new Set());
+  const [workspaceName, setWorkspaceName] = useState("AgentDeck Workspace");
   const [terminalState, setTerminalState] = useState({
     layout: initialSplitLayout as SplitNode | null,
     nextTerminalIndex: 5,
@@ -159,6 +162,48 @@ export function App() {
     setContextMenu(null);
     setSelectedTerminalIds(new Set());
     setSelectionAnchorId(null);
+  }
+
+  function renameTerminal(terminalId: string) {
+    const currentTitle = terminalState.panes[terminalId]?.title ?? terminalId;
+    const nextTitle = window.prompt("Rename terminal", currentTitle)?.trim().slice(0, MAX_PANE_TITLE_LENGTH);
+    if (!nextTitle) {
+      setContextMenu(null);
+      return;
+    }
+
+    setTerminalState((currentState) => ({
+      ...currentState,
+      panes: {
+        ...currentState.panes,
+        [terminalId]: {
+          ...(currentState.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex)),
+          title: nextTitle,
+        },
+      },
+    }));
+    setContextMenu(null);
+  }
+
+  async function saveWorkspace() {
+    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ layout: terminalState.layout, name: workspaceName, nextTerminalIndex: terminalState.nextTerminalIndex, panes: terminalState.panes }));
+  }
+
+  async function importWorkspace() {
+    const document = await getWorkspaceBridge()?.importWorkspace();
+    if (!document) {
+      return;
+    }
+
+    const bridge = getTerminalBridge();
+    await Promise.all(Object.keys(terminalState.panes).map((terminalId) => bridge?.closeSession(terminalId) ?? Promise.resolve(false)));
+
+    setWorkspaceName(document.name);
+    setTerminalState({ layout: document.layout, nextTerminalIndex: document.nextTerminalIndex, panes: document.panes });
+    setContextMenu(null);
+    setSelectedTerminalIds(new Set());
+    setSelectionAnchorId(null);
+    setActivePage("terminal");
   }
 
   function updateLayout(layout: SplitNode) {
@@ -218,9 +263,17 @@ export function App() {
             </button>
           ))}
         </nav>
-        <button aria-label="Settings" className="sidebar__button" title="Settings" type="button">
-          <AgentDeckIcon name="settings" size={19} />
-        </button>
+        <div className="sidebar__workspace-actions">
+          <button aria-label="Save workspace" className="sidebar__button" onClick={saveWorkspace} title="Save workspace" type="button">
+            <AgentDeckIcon name="database" size={18} />
+          </button>
+          <button aria-label="Import workspace" className="sidebar__button" onClick={importWorkspace} title="Import workspace" type="button">
+            <AgentDeckIcon name="folder" size={18} />
+          </button>
+          <button aria-label="Export workspace" className="sidebar__button" onClick={saveWorkspace} title="Export workspace" type="button">
+            <AgentDeckIcon name="settings" size={18} />
+          </button>
+        </div>
       </aside>
 
       <section className="workspace" aria-label="Workspace content">
@@ -235,6 +288,7 @@ export function App() {
           onCloseContextMenu={() => setContextMenu(null)}
           onLayoutChange={updateLayout}
           onOpenTerminalMenu={openTerminalMenu}
+          onRenameTerminal={renameTerminal}
           onRemoveTerminals={removeTerminals}
           onSelectTerminal={selectTerminal}
           panes={terminalState.panes}
@@ -257,6 +311,7 @@ function TerminalWorkspace({
   onCloseContextMenu,
   onLayoutChange,
   onOpenTerminalMenu,
+  onRenameTerminal,
   onRemoveTerminals,
   onSelectTerminal,
   panes,
@@ -272,6 +327,7 @@ function TerminalWorkspace({
   onCloseContextMenu: () => void;
   onLayoutChange: (layout: SplitNode) => void;
   onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
+  onRenameTerminal: (terminalId: string) => void;
   onRemoveTerminals: (terminalIds: string[]) => void;
   onSelectTerminal: (terminalId: string, additive: boolean) => void;
   panes: Record<string, TerminalPane>;
@@ -299,7 +355,7 @@ function TerminalWorkspace({
         selectedTerminalIds={selectedTerminalIds}
         onLayoutChange={onLayoutChange}
       />
-      {contextMenu ? <TerminalContextMenu canAdd={canAddToContextTargets} contextMenu={contextMenu} onAddTerminalToSide={onAddTerminalToSide} onClose={() => onRemoveTerminals(contextTargets)} onDismiss={onCloseContextMenu} targets={contextTargets} /> : null}
+      {contextMenu ? <TerminalContextMenu canAdd={canAddToContextTargets} contextMenu={contextMenu} onAddTerminalToSide={onAddTerminalToSide} onClose={() => onRemoveTerminals(contextTargets)} onDismiss={onCloseContextMenu} onRename={onRenameTerminal} targets={contextTargets} /> : null}
     </section>
   );
 }
@@ -481,6 +537,7 @@ function TerminalContextMenu({
   onAddTerminalToSide,
   onClose,
   onDismiss,
+  onRename,
   targets,
 }: {
   canAdd: boolean;
@@ -488,6 +545,7 @@ function TerminalContextMenu({
   onAddTerminalToSide: (targetIds: string[], side: TerminalSide) => void;
   onClose: () => void;
   onDismiss: () => void;
+  onRename: (terminalId: string) => void;
   targets: string[];
 }) {
   const label = targets.length > 1 ? `${targets.length} terminals` : "terminal";
@@ -520,6 +578,9 @@ function TerminalContextMenu({
       </button>
       <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "left")} role="menuitem" type="button">
         Left
+      </button>
+      <button disabled={targets.length !== 1} onClick={() => onRename(contextMenu.terminalId)} role="menuitem" type="button">
+        Rename
       </button>
       <button className="terminal-context-menu__danger" onClick={onClose} role="menuitem" type="button">
         Close selected

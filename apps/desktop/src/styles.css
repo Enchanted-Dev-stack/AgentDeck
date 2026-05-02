@@ -54,7 +54,7 @@ button {
   background: var(--sidebar);
   border-right: 1px solid var(--line);
   display: grid;
-  grid-template-rows: 56px 1fr 56px;
+  grid-template-rows: 56px 1fr auto;
   justify-items: center;
   min-width: 0;
 }
@@ -75,6 +75,12 @@ button {
 .sidebar__nav {
   display: grid;
   gap: 4px;
+}
+
+.sidebar__workspace-actions {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 8px;
 }
 
 .sidebar__button {

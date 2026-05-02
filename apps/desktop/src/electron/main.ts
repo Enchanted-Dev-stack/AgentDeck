@@ -1,13 +1,16 @@
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, type OpenDialogOptions, type SaveDialogOptions } from "electron";
 import { spawnSync } from "node:child_process";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as pty from "node-pty";
 import { resolveDefaultShell, TerminalSessionHost, type PtyAdapter, type ResolvedShell, type TerminalSpawnOptions } from "@agentdeck/terminal";
-import { terminalChannels, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { terminalChannels, workspaceChannels, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { parseWorkspaceDocument } from "../workspace/schema.js";
 
 const MAX_TERMINAL_ID_LENGTH = 80;
 const MAX_TERMINAL_WRITE_LENGTH = 16_384;
+const MAX_WORKSPACE_FILE_BYTES = 1_000_000;
 const sessionOwners = new Map<string, number>();
 
 class NodePtyAdapter implements PtyAdapter {
@@ -107,6 +110,69 @@ function registerTerminalIpc() {
     }
 
     return closed;
+  });
+}
+
+function registerWorkspaceIpc() {
+  ipcMain.handle(workspaceChannels.save, async (event, payload: unknown) => {
+    if (!isTrustedIpcEvent(event)) {
+      return false;
+    }
+
+    const document = parseWorkspaceDocument(payload);
+    if (!document) {
+      return false;
+    }
+
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const saveDialogOptions: SaveDialogOptions = {
+      defaultPath: `${document.name || "AgentDeck Workspace"}.agentdeck.json`,
+      filters: [{ extensions: ["agentdeck.json", "json"], name: "AgentDeck workspace" }],
+      title: "Save AgentDeck workspace",
+    };
+    const result = ownerWindow ? await dialog.showSaveDialog(ownerWindow, saveDialogOptions) : await dialog.showSaveDialog(saveDialogOptions);
+    if (result.canceled || !result.filePath) {
+      return false;
+    }
+
+    try {
+      await writeFile(result.filePath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+      return true;
+    } catch (error) {
+      console.error("Failed to save workspace", error);
+      return false;
+    }
+  });
+
+  ipcMain.handle(workspaceChannels.import, async (event) => {
+    if (!isTrustedIpcEvent(event)) {
+      return null;
+    }
+
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const openDialogOptions: OpenDialogOptions = {
+      filters: [{ extensions: ["agentdeck.json", "json"], name: "AgentDeck workspace" }],
+      properties: ["openFile"],
+      title: "Import AgentDeck workspace",
+    };
+    const result = ownerWindow ? await dialog.showOpenDialog(ownerWindow, openDialogOptions) : await dialog.showOpenDialog(openDialogOptions);
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) {
+      return null;
+    }
+
+    try {
+      const fileStats = await stat(filePath);
+      if (fileStats.size > MAX_WORKSPACE_FILE_BYTES) {
+        return null;
+      }
+
+      const rawDocument = await readFile(filePath, "utf8");
+      return parseWorkspaceDocument(JSON.parse(rawDocument));
+    } catch (error) {
+      console.error("Failed to import workspace", error);
+      return null;
+    }
   });
 }
 
@@ -259,16 +325,17 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerTerminalIpc();
+  registerWorkspaceIpc();
   const window = createWindow();
 
   if (process.env.AGENTDECK_SMOKE_TEST === "1") {
-    const fallbackTimer = setTimeout(() => app.quit(), 5_000);
+    const fallbackTimer = setTimeout(() => app.exit(1), 5_000);
     window.webContents.once("did-finish-load", async () => {
-      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.terminal)");
+      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.terminal && window.agentDeck?.workspace)");
       console.log(`AgentDeck preload bridge: ${hasBridge ? "available" : "missing"}`);
       setTimeout(() => {
         clearTimeout(fallbackTimer);
-        app.quit();
+        app.exit(hasBridge ? 0 : 1);
       }, 1_000);
     });
   }

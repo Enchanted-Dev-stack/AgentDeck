@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { terminalChannels, type AgentDeckBridge, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { terminalChannels, workspaceChannels, type AgentDeckBridge, type TerminalCreateRequest } from "../terminal/bridge.js";
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
+import type { WorkspaceDocument } from "../workspace/schema.js";
 
 const bridge: AgentDeckBridge = {
   terminal: {
@@ -18,6 +19,10 @@ const bridge: AgentDeckBridge = {
     },
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke(terminalChannels.resize, id, cols, rows) as Promise<boolean>,
     write: (id: string, data: string) => ipcRenderer.invoke(terminalChannels.write, id, data) as Promise<boolean>,
+  },
+  workspace: {
+    importWorkspace: () => ipcRenderer.invoke(workspaceChannels.import) as Promise<WorkspaceDocument | null>,
+    saveWorkspace: (document: WorkspaceDocument) => ipcRenderer.invoke(workspaceChannels.save, document) as Promise<boolean>,
   },
 };
 

@@ -1,4 +1,5 @@
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
+import type { WorkspaceDocument } from "../workspace/schema.js";
 
 export const terminalChannels = {
   close: "terminal:close",
@@ -7,6 +8,11 @@ export const terminalChannels = {
   exit: "terminal:exit",
   resize: "terminal:resize",
   write: "terminal:write",
+} as const;
+
+export const workspaceChannels = {
+  import: "workspace:import",
+  save: "workspace:save",
 } as const;
 
 export interface TerminalCreateRequest {
@@ -24,8 +30,14 @@ export interface TerminalBridge {
   write: (id: string, data: string) => Promise<boolean>;
 }
 
+export interface WorkspaceBridge {
+  importWorkspace: () => Promise<WorkspaceDocument | null>;
+  saveWorkspace: (document: WorkspaceDocument) => Promise<boolean>;
+}
+
 export interface AgentDeckBridge {
   terminal: TerminalBridge;
+  workspace: WorkspaceBridge;
 }
 
 declare global {
@@ -36,4 +48,8 @@ declare global {
 
 export function getTerminalBridge() {
   return typeof window === "undefined" ? undefined : window.agentDeck?.terminal;
+}
+
+export function getWorkspaceBridge() {
+  return typeof window === "undefined" ? undefined : window.agentDeck?.workspace;
 }
