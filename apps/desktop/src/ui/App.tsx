@@ -37,7 +37,7 @@ const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
   { id: "memory", label: "Memory", icon: "brain" },
 ];
 
-const terminalPanes: Record<string, TerminalPane> = {
+const initialTerminalPanes: Record<string, TerminalPane> = {
   "term-1": { id: "term-1", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "running", tone: "success", command: "opencode ." },
   "term-2": { id: "term-2", title: "Dev server", detail: "Vite desktop preview", status: "idle", tone: "neutral", command: "pnpm --filter @agentdeck/desktop dev" },
   "term-3": { id: "term-3", title: "Tests", detail: "workspace verification", status: "exit 0", tone: "success", command: "pnpm -r test" },
@@ -91,7 +91,46 @@ const memories = [
 
 export function App() {
   const [activePage, setActivePage] = useState<Page>("terminal");
-  const [layout, setLayout] = useState<SplitNode>(initialSplitLayout);
+  const [terminalState, setTerminalState] = useState({
+    layout: initialSplitLayout as SplitNode | null,
+    nextTerminalIndex: 5,
+    panes: initialTerminalPanes,
+  });
+
+  function addTerminal(targetId: string | undefined, direction: SplitDirection = "row") {
+    setTerminalState((currentState) => {
+      const terminalIndex = currentState.nextTerminalIndex;
+      const terminalId = `term-${terminalIndex}`;
+
+      return {
+        layout: insertTerminal(currentState.layout, targetId, terminalId, direction),
+        nextTerminalIndex: terminalIndex + 1,
+        panes: {
+          ...currentState.panes,
+          [terminalId]: createTerminalPane(terminalId, terminalIndex),
+        },
+      };
+    });
+  }
+
+  function removeTerminal(terminalId: string) {
+    setTerminalState((currentState) => {
+      const { [terminalId]: _removedPane, ...remainingPanes } = currentState.panes;
+
+      return {
+        ...currentState,
+        layout: removeTerminalFromLayout(currentState.layout, terminalId),
+        panes: remainingPanes,
+      };
+    });
+  }
+
+  function updateLayout(layout: SplitNode) {
+    setTerminalState((currentState) => ({
+      ...currentState,
+      layout,
+    }));
+  }
 
   return (
     <main className="app-shell" aria-label="AgentDeck">
@@ -120,30 +159,71 @@ export function App() {
       </aside>
 
       <section className="workspace" aria-label="Workspace content">
-        {activePage === "terminal" ? <TerminalWorkspace layout={layout} onLayoutChange={setLayout} /> : <ResourcePage page={activePage} />}
+        {activePage === "terminal" ? (
+          <TerminalWorkspace layout={terminalState.layout} onAddTerminal={addTerminal} onLayoutChange={updateLayout} onRemoveTerminal={removeTerminal} panes={terminalState.panes} />
+        ) : (
+          <ResourcePage page={activePage} />
+        )}
       </section>
     </main>
   );
 }
 
-function TerminalWorkspace({ layout, onLayoutChange }: { layout: SplitNode; onLayoutChange: (layout: SplitNode) => void }) {
+function TerminalWorkspace({
+  layout,
+  onAddTerminal,
+  onLayoutChange,
+  onRemoveTerminal,
+  panes,
+}: {
+  layout: SplitNode | null;
+  onAddTerminal: (targetId: string | undefined, direction?: SplitDirection) => void;
+  onLayoutChange: (layout: SplitNode) => void;
+  onRemoveTerminal: (terminalId: string) => void;
+  panes: Record<string, TerminalPane>;
+}) {
+  if (!layout) {
+    return (
+      <section className="terminal-workspace terminal-workspace--empty" aria-label="Workspace panes">
+        <button className="empty-terminal-action" onClick={() => onAddTerminal(undefined)} type="button">
+          <AgentDeckIcon name="add" size={17} />
+          Add terminal
+        </button>
+      </section>
+    );
+  }
+
   return (
     <section className="terminal-workspace" aria-label="Workspace panes">
-      <SplitView node={layout} onLayoutChange={onLayoutChange} rootLayout={layout} />
+      <SplitView node={layout} onAddTerminal={onAddTerminal} onLayoutChange={onLayoutChange} onRemoveTerminal={onRemoveTerminal} panes={panes} rootLayout={layout} />
     </section>
   );
 }
 
-function SplitView({ node, onLayoutChange, rootLayout }: { node: SplitNode; onLayoutChange: (layout: SplitNode) => void; rootLayout: SplitNode }) {
+function SplitView({
+  node,
+  onAddTerminal,
+  onLayoutChange,
+  onRemoveTerminal,
+  panes,
+  rootLayout,
+}: {
+  node: SplitNode;
+  onAddTerminal: (targetId: string | undefined, direction?: SplitDirection) => void;
+  onLayoutChange: (layout: SplitNode) => void;
+  onRemoveTerminal: (terminalId: string) => void;
+  panes: Record<string, TerminalPane>;
+  rootLayout: SplitNode;
+}) {
   if (node.type === "terminal") {
-    return <TerminalPaneView pane={terminalPanes[node.id]} />;
+    return <TerminalPaneView onAddTerminal={onAddTerminal} onRemoveTerminal={onRemoveTerminal} pane={panes[node.id]} />;
   }
 
   return (
     <div className={`split split--${node.direction}`} data-split-id={node.id}>
       {node.children.map((child, index) => (
         <div className="split__child" key={getNodeKey(child)} style={getChildStyle(node, child, index)}>
-          <SplitView node={child} onLayoutChange={onLayoutChange} rootLayout={rootLayout} />
+          <SplitView node={child} onAddTerminal={onAddTerminal} onLayoutChange={onLayoutChange} onRemoveTerminal={onRemoveTerminal} panes={panes} rootLayout={rootLayout} />
           {index < node.children.length - 1 ? <ResizeSash direction={node.direction} group={node} index={index} onLayoutChange={onLayoutChange} rootLayout={rootLayout} /> : null}
         </div>
       ))}
@@ -235,7 +315,15 @@ function ResizeSash({
   );
 }
 
-function TerminalPaneView({ pane }: { pane: TerminalPane | undefined }) {
+function TerminalPaneView({
+  onAddTerminal,
+  onRemoveTerminal,
+  pane,
+}: {
+  onAddTerminal: (targetId: string | undefined, direction?: SplitDirection) => void;
+  onRemoveTerminal: (terminalId: string) => void;
+  pane: TerminalPane | undefined;
+}) {
   if (!pane) {
     return null;
   }
@@ -247,7 +335,20 @@ function TerminalPaneView({ pane }: { pane: TerminalPane | undefined }) {
           <AgentDeckIcon name="terminal" size={14} />
           {pane.title}
         </span>
-        <span className={`terminal-pane__status terminal-pane__status--${pane.tone}`}>{pane.status}</span>
+        <span className="terminal-pane__meta">
+          <span className={`terminal-pane__status terminal-pane__status--${pane.tone}`}>{pane.status}</span>
+          <span className="terminal-pane__actions">
+            <button aria-label={`Split ${pane.title} right`} onClick={() => onAddTerminal(pane.id, "row")} title="Split right" type="button">
+              <AgentDeckIcon name="splitRight" size={13} />
+            </button>
+            <button aria-label={`Split ${pane.title} down`} onClick={() => onAddTerminal(pane.id, "column")} title="Split down" type="button">
+              <AgentDeckIcon name="splitDown" size={13} />
+            </button>
+            <button aria-label={`Close ${pane.title}`} onClick={() => onRemoveTerminal(pane.id)} title="Close terminal" type="button">
+              <AgentDeckIcon name="delete" size={13} />
+            </button>
+          </span>
+        </span>
       </header>
       <div className="terminal-pane__body">
         <p className="terminal-pane__command">$ {pane.command}</p>
@@ -311,6 +412,129 @@ export function resizeAdjacentSizes(sizes: number[], index: number, deltaPixels:
 
     return size;
   });
+}
+
+export function insertTerminal(layout: SplitNode | null, targetId: string | undefined, terminalId: string, direction: SplitDirection): SplitNode {
+  const terminal: TerminalNode = { type: "terminal", id: terminalId };
+  if (!layout || !targetId) {
+    return terminal;
+  }
+
+  if (layout.type === "terminal") {
+    if (layout.id !== targetId) {
+      return layout;
+    }
+
+    return createSplitGroup(`split-${targetId}-${terminalId}`, direction, [layout, terminal]);
+  }
+
+  const directIndex = layout.children.findIndex((child) => child.type === "terminal" && child.id === targetId);
+  if (directIndex >= 0) {
+    if (layout.direction !== direction) {
+      return {
+        ...layout,
+        children: layout.children.map((child, childIndex) => (childIndex === directIndex ? createSplitGroup(`split-${targetId}-${terminalId}`, direction, [child, terminal]) : child)),
+      };
+    }
+
+    const targetSize = layout.sizes[directIndex] ?? 1 / layout.children.length;
+    return {
+      ...layout,
+      children: insertAt(layout.children, directIndex + 1, terminal),
+      sizes: insertAt(
+        layout.sizes.map((size, sizeIndex) => (sizeIndex === directIndex ? targetSize / 2 : size)),
+        directIndex + 1,
+        targetSize / 2,
+      ),
+    };
+  }
+
+  return {
+    ...layout,
+    children: layout.children.map((child) => insertTerminal(child, targetId, terminalId, direction)),
+  };
+}
+
+export function removeTerminalFromLayout(layout: SplitNode | null, terminalId: string): SplitNode | null {
+  if (!layout) {
+    return null;
+  }
+
+  if (layout.type === "terminal") {
+    return layout.id === terminalId ? null : layout;
+  }
+
+  const nextEntries = layout.children.map((child, index) => ({
+    child: removeTerminalFromLayout(child, terminalId),
+    size: layout.sizes[index] ?? 1 / layout.children.length,
+  }));
+
+  nextEntries.forEach((entry, index) => {
+    if (entry.child) {
+      return;
+    }
+
+    const previousIndex = findRetainedSiblingIndex(nextEntries, index, -1);
+    const nextIndex = findRetainedSiblingIndex(nextEntries, index, 1);
+    const targetIndex = previousIndex >= 0 ? previousIndex : nextIndex;
+    const targetEntry = nextEntries[targetIndex];
+    if (targetEntry) {
+      targetEntry.size += entry.size;
+    }
+  });
+
+  const retainedEntries = nextEntries.filter((entry): entry is { child: SplitNode; size: number } => Boolean(entry.child));
+  const retainedChildren = retainedEntries.map((entry) => entry.child);
+  const retainedSizes = retainedEntries.map((entry) => entry.size);
+
+  if (retainedChildren.length === 0) {
+    return null;
+  }
+
+  if (retainedChildren.length === 1) {
+    return retainedChildren[0] ?? null;
+  }
+
+  return {
+    ...layout,
+    children: retainedChildren,
+    sizes: retainedSizes,
+  };
+}
+
+function createTerminalPane(id: string, index: number): TerminalPane {
+  return {
+    command: "shell",
+    detail: "new local terminal",
+    id,
+    status: "ready",
+    title: `Terminal ${index}`,
+    tone: "neutral",
+  };
+}
+
+function createSplitGroup(id: string, direction: SplitDirection, children: SplitNode[]): SplitGroup {
+  return {
+    children,
+    direction,
+    id,
+    sizes: children.map(() => 1 / children.length),
+    type: "split",
+  };
+}
+
+function insertAt<T>(items: T[], index: number, item: T) {
+  return [...items.slice(0, index), item, ...items.slice(index)];
+}
+
+function findRetainedSiblingIndex(entries: Array<{ child: SplitNode | null; size: number }>, startIndex: number, direction: -1 | 1) {
+  for (let index = startIndex + direction; index >= 0 && index < entries.length; index += direction) {
+    if (entries[index]?.child) {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function getChildStyle(parent: SplitGroup, child: SplitNode, index: number): CSSProperties {

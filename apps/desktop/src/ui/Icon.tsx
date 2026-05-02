@@ -1,11 +1,15 @@
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
+  Add01Icon,
   Brain02Icon,
   CommandLineIcon,
   DatabaseIcon,
+  Delete02Icon,
   DragDropIcon,
   FolderOpenIcon,
   GridViewIcon,
+  InsertColumnRightIcon,
+  InsertRowDownIcon,
   LayoutGridIcon,
   MoreHorizontalIcon,
   NoteIcon,
@@ -18,12 +22,16 @@ import {
 } from "@hugeicons/core-free-icons";
 
 const iconRegistry = {
+  add: Add01Icon,
   brain: Brain02Icon,
   command: CommandLineIcon,
   database: DatabaseIcon,
+  delete: Delete02Icon,
   drag: DragDropIcon,
   folder: FolderOpenIcon,
   grid: GridViewIcon,
+  splitDown: InsertRowDownIcon,
+  splitRight: InsertColumnRightIcon,
   layout: LayoutGridIcon,
   more: MoreHorizontalIcon,
   note: NoteIcon,
