@@ -12,6 +12,9 @@ Tools use dot-separated names grouped by domain.
 
 - `workspace.list`
 - `workspace.get`
+- `workspace.find_by_root_path`
+- `workspace.create`
+- `pane.create`
 - `todo.create`
 - `todo.list`
 - `todo.update`

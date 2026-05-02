@@ -9,6 +9,8 @@ AgentDeck is local-first, but it manages terminals, MCP tools, docs, and memory.
 - Secrets are not intentionally indexed or stored.
 - Environment variables are referenced, not copied into workspace exports.
 - Docs reads are restricted to configured workspace roots.
+- Shared-state writes use a local lock file and atomic replace to reduce cross-process clobbering and partial-write corruption.
+- Free-text workspace, pane, todo, note, and memory fields are scanned for common secret patterns before persistence.
 
 ## Secret Handling
 
