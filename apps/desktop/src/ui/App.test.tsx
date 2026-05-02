@@ -1,10 +1,18 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("./TerminalEmulator.js", () => ({
+  TerminalEmulator: ({ paneId }: { paneId: string }) => <div data-testid={`terminal-emulator-${paneId}`} />,
+}));
+
 import { App, canInsertTerminalOnSide, getTerminalRange, initialSplitLayout, insertTerminal, insertTerminalOnSide, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
 
 afterEach(() => cleanup());
+afterEach(() => {
+  delete window.agentDeck;
+});
 
 describe("App", () => {
   test("renders a zero-gap terminal workspace shell", () => {
@@ -110,8 +118,11 @@ describe("App", () => {
     expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
 
     fireEvent.contextMenu(screen.getByLabelText("Terminal 5 terminal"), { clientX: 24, clientY: 30 });
+    const closeSession = vi.fn(() => Promise.resolve(true));
+    window.agentDeck = createFakeBridge({ closeSession });
     fireEvent.click(screen.getByRole("menuitem", { name: "Close selected" }));
     expect(screen.queryByLabelText("Terminal 5 terminal")).toBeNull();
+    expect(closeSession).toHaveBeenCalledWith("term-5");
   });
 
   test("opens and dismisses the terminal menu from the keyboard", () => {
@@ -223,4 +234,18 @@ function findSplitSizes(node: typeof initialSplitLayout, id: string): number[] |
   }
 
   return undefined;
+}
+
+function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> = {}): NonNullable<Window["agentDeck"]> {
+  return {
+    terminal: {
+      closeSession: () => Promise.resolve(true),
+      createSession: () => Promise.resolve(true),
+      onData: () => () => undefined,
+      onExit: () => () => undefined,
+      resize: () => Promise.resolve(true),
+      write: () => Promise.resolve(true),
+      ...overrides,
+    },
+  };
 }

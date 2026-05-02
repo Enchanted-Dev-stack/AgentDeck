@@ -3,20 +3,26 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "out/main/main.js",
   "scripts": {
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && electron-vite build",
     "check": "pnpm typecheck",
-    "dev": "vite --host 127.0.0.1",
+    "dev": "electron-vite dev",
     "lint": "tsc --noEmit",
+    "preview": "electron-vite preview",
     "test": "vitest run --config vitest.config.ts --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@agentdeck/core": "workspace:*",
+    "@agentdeck/terminal": "workspace:*",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/outfit": "^5.2.8",
     "@hugeicons/core-free-icons": "^4.1.1",
     "@hugeicons/react": "^1.1.6",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
@@ -25,10 +31,12 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-react": "^5.1.2",
+    "electron": "^41.5.0",
+    "electron-vite": "^5.0.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.7.2",
-    "vite": "^8.0.10",
+    "vite": "^7.2.7",
     "vitest": "^2.1.8"
   }
 }

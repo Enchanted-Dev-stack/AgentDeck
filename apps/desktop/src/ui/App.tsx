@@ -1,5 +1,7 @@
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import { getTerminalBridge } from "../terminal/bridge.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
+import { TerminalEmulator } from "./TerminalEmulator.js";
 
 type Page = "terminal" | "docs" | "todos" | "memory";
 type SplitDirection = "row" | "column";
@@ -150,6 +152,10 @@ export function App() {
         panes: remainingPanes,
       };
     });
+    const bridge = getTerminalBridge();
+    for (const terminalId of terminalIds) {
+      void bridge?.closeSession(terminalId);
+    }
     setContextMenu(null);
     setSelectedTerminalIds(new Set());
     setSelectionAnchorId(null);
@@ -218,25 +224,23 @@ export function App() {
       </aside>
 
       <section className="workspace" aria-label="Workspace content">
-        {activePage === "terminal" ? (
-          <TerminalWorkspace
-            contextMenu={contextMenu}
-            canAddToContextTargets={canAddToContextTargets}
-            contextTargets={contextTargets}
-            layout={terminalState.layout}
-            onAddTerminal={addTerminal}
-            onAddTerminalToSide={addTerminalToSide}
-            onCloseContextMenu={() => setContextMenu(null)}
-            onLayoutChange={updateLayout}
-            onOpenTerminalMenu={openTerminalMenu}
-            onRemoveTerminals={removeTerminals}
-            onSelectTerminal={selectTerminal}
-            panes={terminalState.panes}
-            selectedTerminalIds={selectedTerminalIds}
-          />
-        ) : (
-          <ResourcePage page={activePage} />
-        )}
+        <TerminalWorkspace
+          contextMenu={contextMenu}
+          canAddToContextTargets={canAddToContextTargets}
+          contextTargets={contextTargets}
+          hidden={activePage !== "terminal"}
+          layout={terminalState.layout}
+          onAddTerminal={addTerminal}
+          onAddTerminalToSide={addTerminalToSide}
+          onCloseContextMenu={() => setContextMenu(null)}
+          onLayoutChange={updateLayout}
+          onOpenTerminalMenu={openTerminalMenu}
+          onRemoveTerminals={removeTerminals}
+          onSelectTerminal={selectTerminal}
+          panes={terminalState.panes}
+          selectedTerminalIds={selectedTerminalIds}
+        />
+        {activePage !== "terminal" ? <ResourcePage page={activePage} /> : null}
       </section>
     </main>
   );
@@ -246,6 +250,7 @@ function TerminalWorkspace({
   canAddToContextTargets,
   contextMenu,
   contextTargets,
+  hidden,
   layout,
   onAddTerminal,
   onAddTerminalToSide,
@@ -260,6 +265,7 @@ function TerminalWorkspace({
   canAddToContextTargets: boolean;
   contextMenu: ContextMenuState | null;
   contextTargets: string[];
+  hidden: boolean;
   layout: SplitNode | null;
   onAddTerminal: (targetId: string | undefined, side?: TerminalSide) => void;
   onAddTerminalToSide: (targetIds: string[], side: TerminalSide) => void;
@@ -273,7 +279,7 @@ function TerminalWorkspace({
 }) {
   if (!layout) {
     return (
-      <section className="terminal-workspace terminal-workspace--empty" aria-label="Workspace panes">
+      <section className="terminal-workspace terminal-workspace--empty" aria-label="Workspace panes" hidden={hidden}>
         <button className="empty-terminal-action" onClick={() => onAddTerminal(undefined)} type="button">
           <AgentDeckIcon name="add" size={17} />
           Add terminal
@@ -283,7 +289,7 @@ function TerminalWorkspace({
   }
 
   return (
-    <section aria-label="Workspace panes" aria-multiselectable="true" className="terminal-workspace" onClick={onCloseContextMenu} role="listbox">
+    <section aria-label="Workspace panes" aria-multiselectable="true" className="terminal-workspace" hidden={hidden} onClick={onCloseContextMenu} role="listbox">
       <SplitView
         node={layout}
         onOpenTerminalMenu={onOpenTerminalMenu}
@@ -463,13 +469,7 @@ function TerminalPaneView({ isSelected, onOpenMenu, onSelect, pane }: { isSelect
         </span>
       </header>
       <div className="terminal-pane__body">
-        <p className="terminal-pane__command">$ {pane.command}</p>
-        <p>{pane.detail}</p>
-        <div className="terminal-pane__lines" aria-hidden="true">
-          <span>&gt; context.get_project_context</span>
-          <span>&gt; todo.list --workspace current</span>
-          <span>&gt; ready for shared-state operations</span>
-        </div>
+        <TerminalEmulator paneId={terminalPane.id} />
       </div>
     </article>
   );

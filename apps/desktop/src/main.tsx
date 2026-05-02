@@ -7,6 +7,7 @@ import "@fontsource/outfit/700.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
+import "@xterm/xterm/css/xterm.css";
 import { App } from "./ui/App.js";
 import "./styles.css";
 
