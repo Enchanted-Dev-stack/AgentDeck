@@ -39,23 +39,23 @@
 }
 
 :root {
-  --color-bg: #f5f3ee;
-  --color-shell: #fbfaf7;
-  --color-panel: #ffffff;
-  --color-panel-soft: #f8f6f0;
-  --color-terminal: #101214;
-  --color-terminal-soft: #171a1d;
-  --color-line: #e4dfd2;
-  --color-line-strong: #d4cdbc;
-  --color-text: #1d211f;
-  --color-text-muted: #6c716d;
-  --color-text-dim: #9a9f99;
-  --color-accent: #3157ff;
-  --color-accent-soft: #e7ebff;
-  --color-accent-live: #2f9e66;
-  --color-accent-warn: #b7791f;
-  --color-accent-danger: #df3b30;
-  --color-shadow: 0 22px 70px rgba(43, 38, 29, 0.12);
+  --color-bg: #090a0f;
+  --color-shell: #10131c;
+  --color-panel: #151925;
+  --color-panel-soft: #1b2030;
+  --color-terminal: #07080b;
+  --color-terminal-soft: #11141b;
+  --color-line: #262c3b;
+  --color-line-strong: #343c50;
+  --color-text: #f4f0e8;
+  --color-text-muted: #aeb6c8;
+  --color-text-dim: #8992a8;
+  --color-accent: #7c8cff;
+  --color-accent-soft: #202746;
+  --color-accent-live: #62d89b;
+  --color-accent-warn: #e1b45f;
+  --color-accent-danger: #ff6b5f;
+  --color-shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
   --font-display: "Cabinet Grotesk", Outfit, system-ui, sans-serif;
   --font-body: Outfit, Inter, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
@@ -74,8 +74,8 @@ body {
   margin: 0;
   min-width: 0;
   background:
-    radial-gradient(circle at top left, rgba(49, 87, 255, 0.11), transparent 32rem),
-    radial-gradient(circle at bottom right, rgba(47, 158, 102, 0.09), transparent 30rem),
+    radial-gradient(circle at top left, rgba(124, 140, 255, 0.18), transparent 34rem),
+    radial-gradient(circle at bottom right, rgba(98, 216, 155, 0.09), transparent 32rem),
     var(--color-bg);
 }
 
@@ -102,7 +102,7 @@ button:active,
 .workspace-dock,
 .context-deck,
 .event-strip {
-  background: color-mix(in srgb, var(--color-shell) 92%, transparent);
+  background: color-mix(in srgb, var(--color-shell) 90%, transparent);
   border: 1px solid var(--color-line);
   box-shadow: var(--color-shadow);
 }
@@ -142,8 +142,8 @@ button:active,
 
 .rail-status {
   align-items: center;
-  background: #eaf7ef;
-  border: 1px solid #c7ead6;
+  background: rgba(98, 216, 155, 0.12);
+  border: 1px solid rgba(98, 216, 155, 0.22);
   border-radius: 999px;
   color: var(--color-accent-live);
   display: inline-flex;
@@ -282,9 +282,9 @@ h1 {
 
 .workspace-row:hover,
 .workspace-row:focus-visible {
-  background: #fff;
+  background: #1b2132;
   border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-line));
-  box-shadow: 0 14px 36px rgba(49, 87, 255, 0.11);
+  box-shadow: 0 14px 36px rgba(124, 140, 255, 0.14);
   outline: none;
 }
 
@@ -323,14 +323,107 @@ h1 {
   padding: 7px 0;
 }
 
+.main-workspace {
+  display: grid;
+  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.layout-toolbar {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-shell) 92%, transparent);
+  border: 1px solid var(--color-line);
+  border-radius: 20px;
+  box-shadow: var(--color-shadow);
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.layout-toolbar__label,
+.layout-toolbar__hint {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.layout-toolbar__hint {
+  color: var(--color-text-dim);
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.layout-switcher {
+  align-items: center;
+  background: var(--color-panel-soft);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+}
+
+.layout-button {
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 10px;
+  transition:
+    background 150ms var(--ease-out),
+    color 150ms var(--ease-out),
+    transform 120ms var(--ease-out);
+}
+
+.layout-button:hover,
+.layout-button:focus-visible {
+  color: var(--color-text);
+  outline: none;
+}
+
+.layout-button[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: #080a10;
+}
+
 .pane-grid {
   align-content: stretch;
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(220px, 1fr));
+  height: 100%;
   min-width: 0;
   overflow: auto;
+}
+
+.pane-grid[data-layout="columns"] {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.pane-grid[data-layout="rows"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(150px, 1fr);
+  grid-template-rows: none;
+}
+
+.pane-grid[data-layout="focus-left"] {
+  grid-template-columns: minmax(320px, 1.45fr) minmax(260px, 1fr);
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.pane-grid[data-layout="focus-left"] .pane-frame:first-child {
+  grid-row: span 3;
 }
 
 .pane-frame {
@@ -343,9 +436,8 @@ h1 {
   grid-template-rows: 34px 1fr;
   min-height: 220px;
   min-width: 260px;
-  overflow: auto;
+  overflow: hidden;
   position: relative;
-  resize: both;
   transition:
     border-color 160ms var(--ease-out),
     box-shadow 160ms var(--ease-out),
@@ -382,13 +474,23 @@ h1 {
 
 .pane-drag-handle {
   align-items: center;
+  background: transparent;
+  border: 0;
   color: #717a73;
   cursor: grab;
   display: inline-flex;
+  padding: 0;
+  transition: color 140ms var(--ease-out), transform 120ms var(--ease-out);
 }
 
 .pane-drag-handle:active {
   cursor: grabbing;
+}
+
+.pane-drag-handle:hover,
+.pane-drag-handle:focus-visible {
+  color: #f6f7f4;
+  outline: none;
 }
 
 .pane-actions {
@@ -427,6 +529,7 @@ h1 {
   color: #aeb7b0;
   font-family: var(--font-mono);
   font-size: 12px;
+  overflow: auto;
   padding: 20px;
 }
 
@@ -462,18 +565,6 @@ h1 {
   gap: 8px;
   margin-top: 28px;
   padding-left: 14px;
-}
-
-.pane-resize-hint {
-  border-bottom: 2px solid #58606a;
-  border-right: 2px solid #58606a;
-  bottom: 8px;
-  height: 12px;
-  opacity: 0.8;
-  pointer-events: none;
-  position: absolute;
-  right: 8px;
-  width: 12px;
 }
 
 .deck-panel {
