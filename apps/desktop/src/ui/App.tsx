@@ -1,8 +1,9 @@
-import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useState } from "react";
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 
 type Page = "terminal" | "docs" | "todos" | "memory";
 type SplitDirection = "row" | "column";
+type TerminalSide = "left" | "right" | "top" | "bottom";
 type SplitNode = TerminalNode | SplitGroup;
 
 interface TerminalNode {
@@ -25,6 +26,17 @@ interface TerminalPane {
   status: string;
   tone: "success" | "neutral" | "warn";
   command: string;
+}
+
+interface ContextMenuState {
+  terminalId: string;
+  x: number;
+  y: number;
+}
+
+interface MenuPosition {
+  x: number;
+  y: number;
 }
 
 const MIN_PANE_WIDTH = 220;
@@ -91,19 +103,30 @@ const memories = [
 
 export function App() {
   const [activePage, setActivePage] = useState<Page>("terminal");
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
+  const [selectedTerminalIds, setSelectedTerminalIds] = useState<Set<string>>(new Set());
   const [terminalState, setTerminalState] = useState({
     layout: initialSplitLayout as SplitNode | null,
     nextTerminalIndex: 5,
     panes: initialTerminalPanes,
   });
 
-  function addTerminal(targetId: string | undefined, direction: SplitDirection = "row") {
+  function addTerminal(targetId: string | undefined, side: TerminalSide = "right") {
+    addTerminalToSide(targetId ? [targetId] : [], side);
+  }
+
+  function addTerminalToSide(targetIds: string[], side: TerminalSide) {
     setTerminalState((currentState) => {
+      if (currentState.layout && !canInsertTerminalOnSide(currentState.layout, targetIds)) {
+        return currentState;
+      }
+
       const terminalIndex = currentState.nextTerminalIndex;
       const terminalId = `term-${terminalIndex}`;
 
       return {
-        layout: insertTerminal(currentState.layout, targetId, terminalId, direction),
+        layout: insertTerminalOnSide(currentState.layout, targetIds, terminalId, side),
         nextTerminalIndex: terminalIndex + 1,
         panes: {
           ...currentState.panes,
@@ -111,18 +134,25 @@ export function App() {
         },
       };
     });
+    setContextMenu(null);
+    setSelectedTerminalIds(new Set());
+    setSelectionAnchorId(null);
   }
 
-  function removeTerminal(terminalId: string) {
+  function removeTerminals(terminalIds: string[]) {
+    const terminalIdSet = new Set(terminalIds);
     setTerminalState((currentState) => {
-      const { [terminalId]: _removedPane, ...remainingPanes } = currentState.panes;
+      const remainingPanes = Object.fromEntries(Object.entries(currentState.panes).filter(([paneId]) => !terminalIdSet.has(paneId)));
 
       return {
         ...currentState,
-        layout: removeTerminalFromLayout(currentState.layout, terminalId),
+        layout: terminalIds.reduce((layout, terminalId) => removeTerminalFromLayout(layout, terminalId), currentState.layout),
         panes: remainingPanes,
       };
     });
+    setContextMenu(null);
+    setSelectedTerminalIds(new Set());
+    setSelectionAnchorId(null);
   }
 
   function updateLayout(layout: SplitNode) {
@@ -131,6 +161,35 @@ export function App() {
       layout,
     }));
   }
+
+  function selectTerminal(terminalId: string, rangeSelect: boolean) {
+    if (!rangeSelect || !selectionAnchorId) {
+      setSelectionAnchorId(terminalId);
+      setSelectedTerminalIds(new Set([terminalId]));
+      return;
+    }
+
+    setSelectedTerminalIds(new Set(getTerminalRange(terminalState.layout, selectionAnchorId, terminalId)));
+  }
+
+  function openTerminalMenu(terminalId: string, position: MenuPosition) {
+    if (!selectedTerminalIds.has(terminalId)) {
+      setSelectedTerminalIds(new Set([terminalId]));
+    }
+
+    setContextMenu({ terminalId, x: position.x, y: position.y });
+  }
+
+  function getContextTargets() {
+    if (!contextMenu) {
+      return [];
+    }
+
+    return selectedTerminalIds.has(contextMenu.terminalId) ? [...selectedTerminalIds] : [contextMenu.terminalId];
+  }
+
+  const contextTargets = getContextTargets();
+  const canAddToContextTargets = canInsertTerminalOnSide(terminalState.layout, contextTargets);
 
   return (
     <main className="app-shell" aria-label="AgentDeck">
@@ -160,7 +219,21 @@ export function App() {
 
       <section className="workspace" aria-label="Workspace content">
         {activePage === "terminal" ? (
-          <TerminalWorkspace layout={terminalState.layout} onAddTerminal={addTerminal} onLayoutChange={updateLayout} onRemoveTerminal={removeTerminal} panes={terminalState.panes} />
+          <TerminalWorkspace
+            contextMenu={contextMenu}
+            canAddToContextTargets={canAddToContextTargets}
+            contextTargets={contextTargets}
+            layout={terminalState.layout}
+            onAddTerminal={addTerminal}
+            onAddTerminalToSide={addTerminalToSide}
+            onCloseContextMenu={() => setContextMenu(null)}
+            onLayoutChange={updateLayout}
+            onOpenTerminalMenu={openTerminalMenu}
+            onRemoveTerminals={removeTerminals}
+            onSelectTerminal={selectTerminal}
+            panes={terminalState.panes}
+            selectedTerminalIds={selectedTerminalIds}
+          />
         ) : (
           <ResourcePage page={activePage} />
         )}
@@ -170,17 +243,33 @@ export function App() {
 }
 
 function TerminalWorkspace({
+  canAddToContextTargets,
+  contextMenu,
+  contextTargets,
   layout,
   onAddTerminal,
+  onAddTerminalToSide,
+  onCloseContextMenu,
   onLayoutChange,
-  onRemoveTerminal,
+  onOpenTerminalMenu,
+  onRemoveTerminals,
+  onSelectTerminal,
   panes,
+  selectedTerminalIds,
 }: {
+  canAddToContextTargets: boolean;
+  contextMenu: ContextMenuState | null;
+  contextTargets: string[];
   layout: SplitNode | null;
-  onAddTerminal: (targetId: string | undefined, direction?: SplitDirection) => void;
+  onAddTerminal: (targetId: string | undefined, side?: TerminalSide) => void;
+  onAddTerminalToSide: (targetIds: string[], side: TerminalSide) => void;
+  onCloseContextMenu: () => void;
   onLayoutChange: (layout: SplitNode) => void;
-  onRemoveTerminal: (terminalId: string) => void;
+  onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
+  onRemoveTerminals: (terminalIds: string[]) => void;
+  onSelectTerminal: (terminalId: string, additive: boolean) => void;
   panes: Record<string, TerminalPane>;
+  selectedTerminalIds: Set<string>;
 }) {
   if (!layout) {
     return (
@@ -194,36 +283,47 @@ function TerminalWorkspace({
   }
 
   return (
-    <section className="terminal-workspace" aria-label="Workspace panes">
-      <SplitView node={layout} onAddTerminal={onAddTerminal} onLayoutChange={onLayoutChange} onRemoveTerminal={onRemoveTerminal} panes={panes} rootLayout={layout} />
+    <section aria-label="Workspace panes" aria-multiselectable="true" className="terminal-workspace" onClick={onCloseContextMenu} role="listbox">
+      <SplitView
+        node={layout}
+        onOpenTerminalMenu={onOpenTerminalMenu}
+        onSelectTerminal={onSelectTerminal}
+        panes={panes}
+        rootLayout={layout}
+        selectedTerminalIds={selectedTerminalIds}
+        onLayoutChange={onLayoutChange}
+      />
+      {contextMenu ? <TerminalContextMenu canAdd={canAddToContextTargets} contextMenu={contextMenu} onAddTerminalToSide={onAddTerminalToSide} onClose={() => onRemoveTerminals(contextTargets)} onDismiss={onCloseContextMenu} targets={contextTargets} /> : null}
     </section>
   );
 }
 
 function SplitView({
   node,
-  onAddTerminal,
   onLayoutChange,
-  onRemoveTerminal,
+  onOpenTerminalMenu,
+  onSelectTerminal,
   panes,
   rootLayout,
+  selectedTerminalIds,
 }: {
   node: SplitNode;
-  onAddTerminal: (targetId: string | undefined, direction?: SplitDirection) => void;
   onLayoutChange: (layout: SplitNode) => void;
-  onRemoveTerminal: (terminalId: string) => void;
+  onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
+  onSelectTerminal: (terminalId: string, additive: boolean) => void;
   panes: Record<string, TerminalPane>;
   rootLayout: SplitNode;
+  selectedTerminalIds: Set<string>;
 }) {
   if (node.type === "terminal") {
-    return <TerminalPaneView onAddTerminal={onAddTerminal} onRemoveTerminal={onRemoveTerminal} pane={panes[node.id]} />;
+    return <TerminalPaneView isSelected={selectedTerminalIds.has(node.id)} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
   }
 
   return (
     <div className={`split split--${node.direction}`} data-split-id={node.id}>
       {node.children.map((child, index) => (
         <div className="split__child" key={getNodeKey(child)} style={getChildStyle(node, child, index)}>
-          <SplitView node={child} onAddTerminal={onAddTerminal} onLayoutChange={onLayoutChange} onRemoveTerminal={onRemoveTerminal} panes={panes} rootLayout={rootLayout} />
+          <SplitView node={child} onLayoutChange={onLayoutChange} onOpenTerminalMenu={onOpenTerminalMenu} onSelectTerminal={onSelectTerminal} panes={panes} rootLayout={rootLayout} selectedTerminalIds={selectedTerminalIds} />
           {index < node.children.length - 1 ? <ResizeSash direction={node.direction} group={node} index={index} onLayoutChange={onLayoutChange} rootLayout={rootLayout} /> : null}
         </div>
       ))}
@@ -315,21 +415,44 @@ function ResizeSash({
   );
 }
 
-function TerminalPaneView({
-  onAddTerminal,
-  onRemoveTerminal,
-  pane,
-}: {
-  onAddTerminal: (targetId: string | undefined, direction?: SplitDirection) => void;
-  onRemoveTerminal: (terminalId: string) => void;
-  pane: TerminalPane | undefined;
-}) {
+function TerminalPaneView({ isSelected, onOpenMenu, onSelect, pane }: { isSelected: boolean; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
   if (!pane) {
     return null;
   }
+  const terminalPane = pane;
+
+  function openMouseMenu(event: ReactMouseEvent<HTMLElement>) {
+    event.preventDefault();
+    onOpenMenu(terminalPane.id, { x: event.clientX, y: event.clientY });
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      onSelect(terminalPane.id, event.shiftKey);
+      return;
+    }
+
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+      return;
+    }
+
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    onOpenMenu(terminalPane.id, { x: rect.left + 16, y: rect.top + 32 });
+  }
 
   return (
-    <article className="terminal-pane" aria-label={`${pane.title} terminal`}>
+    <article
+      aria-label={`${pane.title} terminal`}
+      aria-selected={isSelected}
+      className="terminal-pane"
+      role="option"
+      tabIndex={0}
+      onClick={(event) => onSelect(terminalPane.id, event.shiftKey)}
+      onContextMenu={openMouseMenu}
+      onKeyDown={handleKeyDown}
+    >
       <header className="terminal-pane__header">
         <span className="terminal-pane__title">
           <AgentDeckIcon name="terminal" size={14} />
@@ -337,17 +460,6 @@ function TerminalPaneView({
         </span>
         <span className="terminal-pane__meta">
           <span className={`terminal-pane__status terminal-pane__status--${pane.tone}`}>{pane.status}</span>
-          <span className="terminal-pane__actions">
-            <button aria-label={`Split ${pane.title} right`} onClick={() => onAddTerminal(pane.id, "row")} title="Split right" type="button">
-              <AgentDeckIcon name="splitRight" size={13} />
-            </button>
-            <button aria-label={`Split ${pane.title} down`} onClick={() => onAddTerminal(pane.id, "column")} title="Split down" type="button">
-              <AgentDeckIcon name="splitDown" size={13} />
-            </button>
-            <button aria-label={`Close ${pane.title}`} onClick={() => onRemoveTerminal(pane.id)} title="Close terminal" type="button">
-              <AgentDeckIcon name="delete" size={13} />
-            </button>
-          </span>
         </span>
       </header>
       <div className="terminal-pane__body">
@@ -360,6 +472,59 @@ function TerminalPaneView({
         </div>
       </div>
     </article>
+  );
+}
+
+function TerminalContextMenu({
+  canAdd,
+  contextMenu,
+  onAddTerminalToSide,
+  onClose,
+  onDismiss,
+  targets,
+}: {
+  canAdd: boolean;
+  contextMenu: ContextMenuState;
+  onAddTerminalToSide: (targetIds: string[], side: TerminalSide) => void;
+  onClose: () => void;
+  onDismiss: () => void;
+  targets: string[];
+}) {
+  const label = targets.length > 1 ? `${targets.length} terminals` : "terminal";
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, []);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    event.preventDefault();
+    onDismiss();
+  }
+
+  return (
+    <div className="terminal-context-menu" onKeyDown={handleKeyDown} ref={menuRef} role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
+      <span className="terminal-context-menu__label">{canAdd ? `Add terminal beside ${label}` : "Select one attached pane group"}</span>
+      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "top")} role="menuitem" type="button">
+        Top
+      </button>
+      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "bottom")} role="menuitem" type="button">
+        Bottom
+      </button>
+      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "right")} role="menuitem" type="button">
+        Right
+      </button>
+      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "left")} role="menuitem" type="button">
+        Left
+      </button>
+      <button className="terminal-context-menu__danger" onClick={onClose} role="menuitem" type="button">
+        Close selected
+      </button>
+    </div>
   );
 }
 
@@ -415,44 +580,108 @@ export function resizeAdjacentSizes(sizes: number[], index: number, deltaPixels:
 }
 
 export function insertTerminal(layout: SplitNode | null, targetId: string | undefined, terminalId: string, direction: SplitDirection): SplitNode {
+  return insertTerminalOnSide(layout, targetId ? [targetId] : [], terminalId, direction === "row" ? "right" : "bottom");
+}
+
+export function insertTerminalOnSide(layout: SplitNode | null, targetIds: string[], terminalId: string, side: TerminalSide): SplitNode {
   const terminal: TerminalNode = { type: "terminal", id: terminalId };
-  if (!layout || !targetId) {
+  const uniqueTargetIds = [...new Set(targetIds)];
+  const direction = getSideDirection(side);
+  const insertBeforeSelection = side === "left" || side === "top";
+
+  if (!layout) {
     return terminal;
   }
 
+  if (uniqueTargetIds.length === 0 || !canInsertTerminalOnSide(layout, uniqueTargetIds)) {
+    return layout;
+  }
+
   if (layout.type === "terminal") {
-    if (layout.id !== targetId) {
+    if (!uniqueTargetIds.includes(layout.id)) {
       return layout;
     }
 
-    return createSplitGroup(`split-${targetId}-${terminalId}`, direction, [layout, terminal]);
+    return createSplitGroup(`split-${layout.id}-${terminalId}`, direction, insertBeforeSelection ? [terminal, layout] : [layout, terminal]);
   }
 
-  const directIndex = layout.children.findIndex((child) => child.type === "terminal" && child.id === targetId);
-  if (directIndex >= 0) {
+  const directTargetIndexes = layout.children
+    .map((child, index) => (child.type === "terminal" && uniqueTargetIds.includes(child.id) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (directTargetIndexes.length > 0 && areContiguous(directTargetIndexes)) {
+    const firstIndex = directTargetIndexes[0] ?? 0;
+    const lastIndex = directTargetIndexes[directTargetIndexes.length - 1] ?? firstIndex;
+    const selectedSize = sumRange(layout.sizes, firstIndex, lastIndex, 1 / layout.children.length);
+
     if (layout.direction !== direction) {
+      const selectedChildren = layout.children.slice(firstIndex, lastIndex + 1);
+      const selectedSizes = layout.sizes.slice(firstIndex, lastIndex + 1);
+      const selectedGroup = selectedChildren.length === 1 ? selectedChildren[0] : createSplitGroup(`selection-${terminalId}`, layout.direction, selectedChildren, normalizeSelectionSizes(selectedSizes));
+      if (!selectedGroup) {
+        return layout;
+      }
+
+      const replacementGroup = createSplitGroup(`split-${terminalId}`, direction, insertBeforeSelection ? [terminal, selectedGroup] : [selectedGroup, terminal]);
+
       return {
         ...layout,
-        children: layout.children.map((child, childIndex) => (childIndex === directIndex ? createSplitGroup(`split-${targetId}-${terminalId}`, direction, [child, terminal]) : child)),
+        children: [...layout.children.slice(0, firstIndex), replacementGroup, ...layout.children.slice(lastIndex + 1)],
+        sizes: [...layout.sizes.slice(0, firstIndex), selectedSize, ...layout.sizes.slice(lastIndex + 1)],
       };
     }
 
-    const targetSize = layout.sizes[directIndex] ?? 1 / layout.children.length;
+    const nextChildren = [...layout.children];
+    const nextSizes = [...layout.sizes];
+    const newTerminalSize = selectedSize / (directTargetIndexes.length + 1);
+    const shrinkScale = selectedSize > 0 ? (selectedSize - newTerminalSize) / selectedSize : 1;
+    for (const selectedIndex of directTargetIndexes) {
+      nextSizes[selectedIndex] = (nextSizes[selectedIndex] ?? 1 / layout.children.length) * shrinkScale;
+    }
+
+    const insertionIndex = insertBeforeSelection ? firstIndex : lastIndex + 1;
     return {
       ...layout,
-      children: insertAt(layout.children, directIndex + 1, terminal),
-      sizes: insertAt(
-        layout.sizes.map((size, sizeIndex) => (sizeIndex === directIndex ? targetSize / 2 : size)),
-        directIndex + 1,
-        targetSize / 2,
-      ),
+      children: insertAt(nextChildren, insertionIndex, terminal),
+      sizes: insertAt(nextSizes, insertionIndex, newTerminalSize),
     };
+  }
+
+  const childWithTargetIndex = layout.children.findIndex((child) => containsAnyTerminal(child, uniqueTargetIds));
+  if (childWithTargetIndex < 0) {
+    return layout;
   }
 
   return {
     ...layout,
-    children: layout.children.map((child) => insertTerminal(child, targetId, terminalId, direction)),
+    children: layout.children.map((child, childIndex) => (childIndex === childWithTargetIndex ? insertTerminalOnSide(child, uniqueTargetIds, terminalId, side) : child)),
   };
+}
+
+export function canInsertTerminalOnSide(layout: SplitNode | null, targetIds: string[]): boolean {
+  const uniqueTargetIds = [...new Set(targetIds)];
+  if (!layout || uniqueTargetIds.length === 0) {
+    return false;
+  }
+
+  if (uniqueTargetIds.length === 1) {
+    return containsAnyTerminal(layout, uniqueTargetIds);
+  }
+
+  return hasDirectContiguousTargets(layout, uniqueTargetIds);
+}
+
+export function getTerminalRange(layout: SplitNode | null, anchorId: string, terminalId: string) {
+  const terminalOrder = getTerminalOrder(layout);
+  const anchorIndex = terminalOrder.indexOf(anchorId);
+  const terminalIndex = terminalOrder.indexOf(terminalId);
+  if (anchorIndex < 0 || terminalIndex < 0) {
+    return [terminalId];
+  }
+
+  const startIndex = Math.min(anchorIndex, terminalIndex);
+  const endIndex = Math.max(anchorIndex, terminalIndex);
+  return terminalOrder.slice(startIndex, endIndex + 1);
 }
 
 export function removeTerminalFromLayout(layout: SplitNode | null, terminalId: string): SplitNode | null {
@@ -513,18 +742,85 @@ function createTerminalPane(id: string, index: number): TerminalPane {
   };
 }
 
-function createSplitGroup(id: string, direction: SplitDirection, children: SplitNode[]): SplitGroup {
+function createSplitGroup(id: string, direction: SplitDirection, children: SplitNode[], sizes = children.map(() => 1 / children.length)): SplitGroup {
   return {
     children,
     direction,
     id,
-    sizes: children.map(() => 1 / children.length),
+    sizes,
     type: "split",
   };
 }
 
 function insertAt<T>(items: T[], index: number, item: T) {
   return [...items.slice(0, index), item, ...items.slice(index)];
+}
+
+function getSideDirection(side: TerminalSide): SplitDirection {
+  return side === "left" || side === "right" ? "row" : "column";
+}
+
+function areContiguous(indexes: number[]) {
+  if (indexes.length === 0) {
+    return false;
+  }
+
+  const sortedIndexes = [...indexes].sort((left, right) => left - right);
+  return sortedIndexes.every((index, sortedIndex) => sortedIndex === 0 || index === (sortedIndexes[sortedIndex - 1] ?? index) + 1);
+}
+
+function sumRange(sizes: number[], firstIndex: number, lastIndex: number, fallbackSize: number) {
+  let totalSize = 0;
+  for (let index = firstIndex; index <= lastIndex; index += 1) {
+    totalSize += sizes[index] ?? fallbackSize;
+  }
+
+  return totalSize;
+}
+
+function normalizeSelectionSizes(sizes: number[]) {
+  const totalSize = sizes.reduce((sum, size) => sum + size, 0);
+  if (totalSize <= 0) {
+    return sizes.map(() => 1 / sizes.length);
+  }
+
+  return sizes.map((size) => size / totalSize);
+}
+
+function containsAnyTerminal(node: SplitNode, terminalIds: string[]): boolean {
+  if (node.type === "terminal") {
+    return terminalIds.includes(node.id);
+  }
+
+  return node.children.some((child) => containsAnyTerminal(child, terminalIds));
+}
+
+function hasDirectContiguousTargets(node: SplitNode, terminalIds: string[]): boolean {
+  if (node.type === "terminal") {
+    return false;
+  }
+
+  const directTargetIndexes = node.children
+    .map((child, index) => (child.type === "terminal" && terminalIds.includes(child.id) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (directTargetIndexes.length > 0) {
+    return directTargetIndexes.length === terminalIds.length && areContiguous(directTargetIndexes);
+  }
+
+  return node.children.some((child) => hasDirectContiguousTargets(child, terminalIds));
+}
+
+function getTerminalOrder(layout: SplitNode | null): string[] {
+  if (!layout) {
+    return [];
+  }
+
+  if (layout.type === "terminal") {
+    return [layout.id];
+  }
+
+  return layout.children.flatMap((child) => getTerminalOrder(child));
 }
 
 function findRetainedSiblingIndex(entries: Array<{ child: SplitNode | null; size: number }>, startIndex: number, direction: -1 | 1) {

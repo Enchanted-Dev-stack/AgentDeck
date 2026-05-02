@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test } from "vitest";
-import { App, initialSplitLayout, insertTerminal, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
+import { App, canInsertTerminalOnSide, getTerminalRange, initialSplitLayout, insertTerminal, insertTerminalOnSide, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
 
 afterEach(() => cleanup());
 
@@ -15,8 +15,8 @@ describe("App", () => {
     expect(markup).toContain("Workspace panes");
     expect(markup).toContain("OpenCode terminal");
     expect(markup).toContain("Resize root panes");
-    expect(markup).toContain("Split OpenCode right");
-    expect(markup).toContain("Close OpenCode");
+    expect(markup).not.toContain("Split OpenCode right");
+    expect(markup).not.toContain("Close OpenCode");
     expect(markup).not.toContain("Dynamic Pane Canvas");
     expect(markup).not.toContain("Pane layout presets");
     expect(markup).not.toContain("Drag pane headers");
@@ -74,26 +74,104 @@ describe("App", () => {
     expect(removedLayout.sizes).toEqual([0.5, 0.5]);
   });
 
-  test("lets users add and remove terminal panes", async () => {
-    const user = userEvent.setup();
+  test("adds terminals around adjacent selected panes", () => {
+    const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-3", "term-4"], "term-5", "right");
+    const bottomRowSizes = findSplitSizes(expandedLayout, "bottom-row");
+
+    expect(countTerminals(expandedLayout)).toBe(5);
+    expect(bottomRowSizes).toEqual([0.33333333333333337, 0.33333333333333337, 0.3333333333333333]);
+  });
+
+  test("validates contiguous selections before side insertion", () => {
+    expect(getTerminalRange(initialSplitLayout, "term-2", "term-3")).toEqual(["term-2", "term-3"]);
+    expect(canInsertTerminalOnSide(initialSplitLayout, ["term-3", "term-4"])).toBe(true);
+    expect(canInsertTerminalOnSide(initialSplitLayout, ["term-2", "term-3"])).toBe(false);
+    expect(insertTerminalOnSide(initialSplitLayout, ["term-2", "term-3"], "term-5", "right")).toBe(initialSplitLayout);
+  });
+
+  test("inserts terminals to the requested side", () => {
+    const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-1"], "term-5", "left");
+
+    if (expandedLayout.type !== "split") {
+      throw new Error("Expected split layout");
+    }
+
+    expect(expandedLayout.children[0]).toEqual({ type: "terminal", id: "term-5" });
+    expect(expandedLayout.sizes).toEqual([0.25, 0.25, 0.5]);
+  });
+
+  test("opens a context menu to add and remove terminal panes", async () => {
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Split OpenCode right" }));
+    fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
+    expect(screen.getByRole("menu")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
     expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Close Terminal 5" }));
+    fireEvent.contextMenu(screen.getByLabelText("Terminal 5 terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close selected" }));
     expect(screen.queryByLabelText("Terminal 5 terminal")).toBeNull();
   });
 
-  test("creates unique terminals across repeated adds", async () => {
-    const user = userEvent.setup();
+  test("opens and dismisses the terminal menu from the keyboard", () => {
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Split OpenCode right" }));
-    await user.click(screen.getByRole("button", { name: "Split OpenCode right" }));
+    fireEvent.keyDown(screen.getByLabelText("OpenCode terminal"), { key: "F10", shiftKey: true });
+
+    expect(screen.getByRole("menu")).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  test("creates unique terminals across repeated adds", async () => {
+    render(<App />);
+
+    fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
+    fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
 
     expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
     expect(screen.getByLabelText("Terminal 6 terminal")).toBeTruthy();
+  });
+
+  test("shift-selects adjacent terminals before adding to a side", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByLabelText("Tests terminal"), { shiftKey: true });
+    fireEvent.click(screen.getByLabelText("Scratch terminal"), { shiftKey: true });
+    fireEvent.contextMenu(screen.getByLabelText("Scratch terminal"), { clientX: 24, clientY: 30 });
+
+    expect(screen.getByText("Add terminal beside 2 terminals")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
+    expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
+  });
+
+  test("disables side insertion for non-group selections", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByLabelText("Dev server terminal"));
+    fireEvent.click(screen.getByLabelText("Tests terminal"), { shiftKey: true });
+    fireEvent.contextMenu(screen.getByLabelText("Tests terminal"), { clientX: 24, clientY: 30 });
+
+    expect(screen.getByText("Select one attached pane group")).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Right" }).getAttribute("disabled")).not.toBeNull();
+  });
+
+  test("closes multiple selected terminals", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByLabelText("Tests terminal"));
+    fireEvent.click(screen.getByLabelText("Scratch terminal"), { shiftKey: true });
+    fireEvent.contextMenu(screen.getByLabelText("Scratch terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close selected" }));
+
+    expect(screen.queryByLabelText("Tests terminal")).toBeNull();
+    expect(screen.queryByLabelText("Scratch terminal")).toBeNull();
+    expect(screen.getByLabelText("OpenCode terminal")).toBeTruthy();
+    expect(screen.getByLabelText("Dev server terminal")).toBeTruthy();
   });
 
   test("exposes resize sashes as oriented separators", () => {
