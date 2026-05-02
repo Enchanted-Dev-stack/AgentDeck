@@ -2,4 +2,4 @@
 
 AgentDeck uses Cabinet Grotesk for display headings and titles.
 
-The font binaries are not committed until redistribution rights are confirmed for the public GitHub repository. Local builds can use an installed `Cabinet Grotesk` font family through the CSS `local()` fallback, and this directory is reserved for licensed webfont assets later.
+Confirm the Cabinet Grotesk license before publishing release artifacts or redistributing this repository publicly with font binaries included.

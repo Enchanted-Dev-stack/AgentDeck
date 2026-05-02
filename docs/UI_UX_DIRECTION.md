@@ -1,19 +1,20 @@
 # UI/UX Direction
 
-## Direction: Local Ops Deck
+## Direction: Modern Workspace Deck
 
-AgentDeck should feel like a local developer operations desk: dense, fast, inspectable, keyboard-native, and trustworthy.
+AgentDeck should feel like a modern, approachable workspace for people coordinating CLI agents and local context. It should be calm, clear, keyboard-native, and friendly enough for daily use without feeling like a game, a terminal skin, or a generic SaaS dashboard.
 
 ## Visual Language
 
-- Dark tactical interface.
-- Square panels and hard grid lines.
+- Warm modern app shell with light/dark-ready surfaces.
+- Soft outer panels for navigation and shared context.
+- Terminal panes remain boxy, precise, and highly legible.
 - Cabinet Grotesk for main headings, pane titles, and major workspace labels.
 - Outfit for body copy, forms, lists, and normal interface text.
 - Monospace typography only for terminal output, pane IDs, command labels, telemetry, and code-like metadata.
 - Pane IDs like `TERM-01`, `DOC-02`, `MEM-03`.
-- Rare meaningful accent colors.
-- No generic SaaS cards, pastel gradients, glassmorphism, or confetti.
+- Accent colors are calm and purposeful: blue for active workspace, green for healthy/running, amber for attention, red for destructive/error.
+- Avoid heavy terminal cosplay, generic SaaS card piles, glassmorphism, and decorative gradients that do not support hierarchy.
 - Icons must come from Hugeicons Rounded. Use the shared AgentDeck icon wrapper instead of importing mixed icon libraries directly.
 
 ## Typography
@@ -25,7 +26,7 @@ AgentDeck should feel like a local developer operations desk: dense, fast, inspe
 - Body text should default to 400-500 with compact but readable line heights.
 - Do not rely on browser default font sizes for app surfaces.
 
-Cabinet Grotesk font files are not committed until the redistribution license is confirmed. The app should prefer a local Cabinet Grotesk installation and keep an asset path ready for licensed font files.
+Cabinet Grotesk assets live under `apps/desktop/public/fonts/cabinet-grotesk`. Confirm redistribution rights before public release packaging.
 
 ## Icons
 
@@ -37,20 +38,21 @@ Cabinet Grotesk font files are not committed until the redistribution license is
 ## App Shell
 
 ```text
-Top command rail: workspace, path, branch, MCP status
-Left dock: saved workspaces, docs, memory, MCP servers
-Main grid: terminals, notes, docs, logs
-Right deck: todos, context, memory references
-Bottom event strip: MCP calls, terminal exits, file events
+Top bar: product identity, current workspace, MCP status, command/search
+Left rail: saved workspaces and quick sections
+Main canvas: draggable/resizable terminal/document panes
+Right inspector: todos, context, memory references
+Bottom status strip: MCP calls, terminal exits, file events
 ```
 
 ## Microinteractions
 
-- Pane focus uses a thin scan pulse.
-- Command success/failure stamps the pane header.
-- Saving a layout shows a mechanical `LAYOUT SAVED` stamp.
-- Completing a todo applies a timestamp stamp.
-- Capturing memory compresses source text into a vault row.
+- Buttons and workspace rows use subtle scale-on-press feedback.
+- Pane focus uses a clear blue ring and elevated header, not a scanline effect.
+- Drag handles show grab cursors and small movement affordances.
+- Resizer rails brighten on hover/focus.
+- Completing a todo should feel instant and calm: checkbox fill, slight text fade, timestamp appears.
+- Capturing memory should show a compact confirmation toast/surface, not a theatrical animation.
 
 ## Accessibility
 
