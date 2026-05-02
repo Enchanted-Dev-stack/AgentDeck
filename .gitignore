@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.turbo/
+.cache/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+qdrant_storage/

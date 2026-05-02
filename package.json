@@ -1,0 +1,25 @@
+{
+  "name": "agentdeck",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local-first multi-terminal workspaces with shared MCP context for CLI coding agents.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm -r check",
+    "dev": "pnpm --filter @agentdeck/desktop dev",
+    "format": "prettier --write .",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.8"
+  }
+}
