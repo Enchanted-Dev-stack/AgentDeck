@@ -1,17 +1,34 @@
-import { useEffect, useRef, useState } from "react";
-import { Responsive, type Layout, type ResponsiveLayouts } from "react-grid-layout";
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useState } from "react";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 
 type Page = "terminal" | "docs" | "todos" | "memory";
-type PaneTone = "success" | "neutral" | "warn";
+type SplitDirection = "row" | "column";
+type SplitNode = TerminalNode | SplitGroup;
+
+interface TerminalNode {
+  type: "terminal";
+  id: string;
+}
+
+interface SplitGroup {
+  type: "split";
+  id: string;
+  direction: SplitDirection;
+  sizes: number[];
+  children: SplitNode[];
+}
 
 interface TerminalPane {
   id: string;
   title: string;
   detail: string;
   status: string;
-  tone: PaneTone;
+  tone: "success" | "neutral" | "warn";
+  command: string;
 }
+
+const MIN_PANE_WIDTH = 220;
+const MIN_PANE_HEIGHT = 140;
 
 const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
   { id: "terminal", label: "Terminal", icon: "terminal" },
@@ -20,39 +37,42 @@ const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
   { id: "memory", label: "Memory", icon: "brain" },
 ];
 
-const terminalPanes: TerminalPane[] = [
-  { id: "TERM-01", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "RUNNING", tone: "success" },
-  { id: "TERM-02", title: "Dev Server", detail: "corepack pnpm dev", status: "IDLE", tone: "neutral" },
-  { id: "TERM-03", title: "Tests", detail: "vitest watch", status: "EXIT 0", tone: "success" },
-  { id: "TERM-04", title: "Scratch", detail: "local commands · permissioned", status: "READY", tone: "warn" },
-];
+const terminalPanes: Record<string, TerminalPane> = {
+  "term-1": { id: "term-1", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "running", tone: "success", command: "opencode ." },
+  "term-2": { id: "term-2", title: "Dev server", detail: "Vite desktop preview", status: "idle", tone: "neutral", command: "pnpm --filter @agentdeck/desktop dev" },
+  "term-3": { id: "term-3", title: "Tests", detail: "workspace verification", status: "exit 0", tone: "success", command: "pnpm -r test" },
+  "term-4": { id: "term-4", title: "Scratch", detail: "permissioned local commands", status: "ready", tone: "warn", command: "git status --short" },
+};
 
-export const initialTerminalLayout: Layout = [
-  { i: "TERM-01", x: 0, y: 0, w: 6, h: 7, minW: 3, minH: 4 },
-  { i: "TERM-02", x: 6, y: 0, w: 6, h: 4, minW: 3, minH: 3 },
-  { i: "TERM-03", x: 6, y: 4, w: 3, h: 3, minW: 3, minH: 3 },
-  { i: "TERM-04", x: 9, y: 4, w: 3, h: 3, minW: 3, minH: 3 },
-];
-
-export const initialTerminalLayouts: ResponsiveLayouts<"desktop" | "tablet" | "mobile"> = {
-  desktop: initialTerminalLayout,
-  tablet: [
-    { i: "TERM-01", x: 0, y: 0, w: 6, h: 6, minW: 2, minH: 4 },
-    { i: "TERM-02", x: 0, y: 6, w: 6, h: 4, minW: 2, minH: 3 },
-    { i: "TERM-03", x: 0, y: 10, w: 3, h: 3, minW: 2, minH: 3 },
-    { i: "TERM-04", x: 3, y: 10, w: 3, h: 3, minW: 2, minH: 3 },
-  ],
-  mobile: [
-    { i: "TERM-01", x: 0, y: 0, w: 1, h: 6, minW: 1, minH: 4 },
-    { i: "TERM-02", x: 0, y: 6, w: 1, h: 4, minW: 1, minH: 3 },
-    { i: "TERM-03", x: 0, y: 10, w: 1, h: 3, minW: 1, minH: 3 },
-    { i: "TERM-04", x: 0, y: 13, w: 1, h: 3, minW: 1, minH: 3 },
+export const initialSplitLayout: SplitNode = {
+  type: "split",
+  id: "root",
+  direction: "row",
+  sizes: [0.5, 0.5],
+  children: [
+    { type: "terminal", id: "term-1" },
+    {
+      type: "split",
+      id: "right-stack",
+      direction: "column",
+      sizes: [0.45, 0.55],
+      children: [
+        { type: "terminal", id: "term-2" },
+        {
+          type: "split",
+          id: "bottom-row",
+          direction: "row",
+          sizes: [0.5, 0.5],
+          children: [{ type: "terminal", id: "term-3" }, { type: "terminal", id: "term-4" }],
+        },
+      ],
+    },
   ],
 };
 
 const docs = [
-  { title: "Product Requirements", path: "docs/PRD.md", summary: "Local-first workspace scope, agent surfaces, and V1 boundaries." },
-  { title: "MCP Contract", path: "docs/MCP_CONTRACT.md", summary: "Shared tools and resources exposed to coding agents over stdio." },
+  { title: "Product requirements", path: "docs/PRD.md", summary: "Local-first workspace scope, agent surfaces, and V1 boundaries." },
+  { title: "MCP contract", path: "docs/MCP_CONTRACT.md", summary: "Shared tools and resources exposed to coding agents over stdio." },
   { title: "Architecture", path: "docs/ARCHITECTURE.md", summary: "Desktop shell, shared state package, and MCP server responsibilities." },
 ];
 
@@ -64,180 +84,272 @@ const todos = [
 ];
 
 const memories = [
-  { label: "CONVENTION", text: "Shared memory is durable context, not raw logs." },
-  { label: "DECISION", text: "Use stdio MCP first; HTTP transport is deferred." },
-  { label: "RISK", text: "Terminal execution needs explicit permission boundaries." },
+  { label: "Convention", text: "Shared memory is durable context, not raw logs." },
+  { label: "Decision", text: "Use stdio MCP first; HTTP transport is deferred." },
+  { label: "Risk", text: "Terminal execution needs explicit permission boundaries." },
 ];
 
 export function App() {
   const [activePage, setActivePage] = useState<Page>("terminal");
-  const [layouts, setLayouts] = useState(initialTerminalLayouts);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const canvasWidth = useElementWidth(canvasRef, 1180);
+  const [layout, setLayout] = useState<SplitNode>(initialSplitLayout);
 
   return (
-    <main className="ops-shell" aria-label="AgentDeck workspace deck">
-      <aside className="app-sidebar" aria-label="Primary navigation">
-        <div className="sidebar-brand" aria-label="AgentDeck">
-          <AgentDeckIcon name="sparkles" size={22} />
+    <main className="app-shell" aria-label="AgentDeck">
+      <aside className="sidebar" aria-label="Primary navigation">
+        <div className="sidebar__brand" aria-label="AgentDeck">
+          <AgentDeckIcon name="sparkles" size={20} />
         </div>
-        <nav className="sidebar-nav" aria-label="Workspace pages">
+        <nav className="sidebar__nav" aria-label="Workspace pages">
           {navItems.map((item) => (
             <button
               aria-label={item.label}
               aria-pressed={activePage === item.id}
-              className="sidebar-nav__item"
+              className="sidebar__button"
               key={item.id}
               onClick={() => setActivePage(item.id)}
               title={item.label}
               type="button"
             >
-              <AgentDeckIcon name={item.icon} size={20} />
-              <span>{item.label}</span>
+              <AgentDeckIcon name={item.icon} size={19} />
             </button>
           ))}
         </nav>
-        <button className="sidebar-nav__item sidebar-nav__item--utility" type="button" aria-label="Settings" title="Settings">
-          <AgentDeckIcon name="settings" size={20} />
-          <span>Settings</span>
+        <button aria-label="Settings" className="sidebar__button" title="Settings" type="button">
+          <AgentDeckIcon name="settings" size={19} />
         </button>
       </aside>
 
-      <section className="workspace-stage" aria-label="Workspace content">
-        {activePage === "terminal" ? (
-          <TerminalPage canvasRef={canvasRef} layouts={layouts} onLayoutsChange={setLayouts} width={canvasWidth} />
-        ) : (
-          <ResourcePage page={activePage} />
-        )}
+      <section className="workspace" aria-label="Workspace content">
+        {activePage === "terminal" ? <TerminalWorkspace layout={layout} onLayoutChange={setLayout} /> : <ResourcePage page={activePage} />}
       </section>
     </main>
   );
 }
 
-function TerminalPage({
-  canvasRef,
-  layouts,
-  onLayoutsChange,
-  width,
-}: {
-  canvasRef: React.RefObject<HTMLDivElement | null>;
-  layouts: ResponsiveLayouts<"desktop" | "tablet" | "mobile">;
-  onLayoutsChange: (layouts: ResponsiveLayouts<"desktop" | "tablet" | "mobile">) => void;
-  width: number;
-}) {
-  const breakpoint = getBreakpoint(width);
+function TerminalWorkspace({ layout, onLayoutChange }: { layout: SplitNode; onLayoutChange: (layout: SplitNode) => void }) {
+  return (
+    <section className="terminal-workspace" aria-label="Workspace panes">
+      <SplitView node={layout} onLayoutChange={onLayoutChange} rootLayout={layout} />
+    </section>
+  );
+}
 
-  function nudgePane(paneId: string, dx: number, dy: number) {
-    onLayoutsChange(nudgePaneInLayouts(layouts, paneId, dx, dy));
+function SplitView({ node, onLayoutChange, rootLayout }: { node: SplitNode; onLayoutChange: (layout: SplitNode) => void; rootLayout: SplitNode }) {
+  if (node.type === "terminal") {
+    return <TerminalPaneView pane={terminalPanes[node.id]} />;
   }
 
   return (
-    <div className="terminal-page">
-      <header className="page-heading">
-        <span className="section-kicker section-kicker--with-icon">
-          <AgentDeckIcon name="layout" size={15} />
-          Dynamic Pane Canvas
-        </span>
-        <h1>Terminals</h1>
-        <p>Drag pane headers and pull resize handles. The grid packs panes without overlap or hidden stacking.</p>
-      </header>
-
-      <div className="pane-canvas" ref={canvasRef} aria-label="Workspace panes">
-        <Responsive
-          breakpoint={breakpoint}
-          breakpoints={{ desktop: 960, mobile: 0, tablet: 640 }}
-          className="pane-grid"
-          cols={{ desktop: 12, mobile: 1, tablet: 6 }}
-          dragConfig={{ bounded: true, handle: ".pane-drag-handle" }}
-          layouts={layouts}
-          margin={[12, 12]}
-          onLayoutChange={(_nextLayout, nextLayouts) => onLayoutsChange(copyLayouts(nextLayouts))}
-          resizeConfig={{ handles: ["se", "e", "s"] }}
-          rowHeight={42}
-          width={width}
-        >
-          {terminalPanes.map((pane) => (
-            <article className="pane-frame" key={pane.id}>
-              <header className="pane-header">
-                <span className="pane-header__id">
-                  <button aria-label={`Drag ${pane.title} pane`} className="pane-drag-handle" type="button">
-                    <AgentDeckIcon name="drag" size={15} />
-                  </button>
-                  <AgentDeckIcon name="terminal" size={15} />
-                  {pane.id}
-                </span>
-                <span className="pane-actions">
-                  <button type="button" aria-label={`Move ${pane.title} left`} onClick={() => nudgePane(pane.id, -1, 0)}>
-                    ←
-                  </button>
-                  <button type="button" aria-label={`Move ${pane.title} right`} onClick={() => nudgePane(pane.id, 1, 0)}>
-                    →
-                  </button>
-                  <button type="button" aria-label={`Move ${pane.title} up`} onClick={() => nudgePane(pane.id, 0, -1)}>
-                    ↑
-                  </button>
-                  <button type="button" aria-label={`Move ${pane.title} down`} onClick={() => nudgePane(pane.id, 0, 1)}>
-                    ↓
-                  </button>
-                  <span className={`pane-status pane-status--${pane.tone}`}>{pane.status}</span>
-                </span>
-              </header>
-              <div className="pane-body">
-                <h2 className="pane-title">{pane.title}</h2>
-                <p>{pane.detail}</p>
-                <div className="terminal-lines" aria-hidden="true">
-                  <span>&gt; context.get_project_context</span>
-                  <span>&gt; todo.list --workspace current</span>
-                  <span>&gt; ready for shared-state operations</span>
-                </div>
-              </div>
-            </article>
-          ))}
-        </Responsive>
-      </div>
+    <div className={`split split--${node.direction}`} data-split-id={node.id}>
+      {node.children.map((child, index) => (
+        <div className="split__child" key={getNodeKey(child)} style={getChildStyle(node, child, index)}>
+          <SplitView node={child} onLayoutChange={onLayoutChange} rootLayout={rootLayout} />
+          {index < node.children.length - 1 ? <ResizeSash direction={node.direction} group={node} index={index} onLayoutChange={onLayoutChange} rootLayout={rootLayout} /> : null}
+        </div>
+      ))}
     </div>
   );
 }
 
-export function nudgePaneInLayouts<B extends string>(layouts: ResponsiveLayouts<B>, paneId: string, dx: number, dy: number): ResponsiveLayouts<B> {
-  return Object.fromEntries(
-    Object.entries(layouts).map(([breakpoint, layout]) => [
-      breakpoint,
-      (layout as Layout).map((item) => {
-        if (item.i !== paneId) {
-          return item;
-        }
+function ResizeSash({
+  direction,
+  group,
+  index,
+  onLayoutChange,
+  rootLayout,
+}: {
+  direction: SplitDirection;
+  group: SplitGroup;
+  index: number;
+  onLayoutChange: (layout: SplitNode) => void;
+  rootLayout: SplitNode;
+}) {
+  function getResizeMetrics(target: HTMLElement) {
+    const parentElement = target.parentElement?.parentElement;
+    if (!parentElement) {
+      return undefined;
+    }
 
-        return {
-          ...item,
-          x: Math.max(0, item.x + dx),
-          y: Math.max(0, item.y + dy),
-        };
-      }),
-    ]),
-  ) as unknown as ResponsiveLayouts<B>;
-}
-
-function copyLayouts<B extends string>(layouts: ResponsiveLayouts<B>): ResponsiveLayouts<B> {
-  return Object.fromEntries(Object.entries(layouts).map(([breakpoint, layout]) => [breakpoint, [...(layout as Layout)]])) as unknown as ResponsiveLayouts<B>;
-}
-
-function getBreakpoint(width: number) {
-  if (width >= 960) {
-    return "desktop";
+    const totalPixels = direction === "row" ? parentElement.getBoundingClientRect().width : parentElement.getBoundingClientRect().height;
+    return {
+      minAfterPixels: getSubtreeMinPixels(group.children[index + 1], direction === "row" ? "width" : "height"),
+      minBeforePixels: getSubtreeMinPixels(group.children[index], direction === "row" ? "width" : "height"),
+      totalPixels,
+    };
   }
 
-  if (width >= 640) {
-    return "tablet";
+  function applyResize(deltaPixels: number, metrics: { totalPixels: number; minBeforePixels: number; minAfterPixels: number }) {
+    onLayoutChange(resizeSplitGroup(rootLayout, group.id, index, deltaPixels, metrics.totalPixels, metrics.minBeforePixels, metrics.minAfterPixels));
   }
 
-  return "mobile";
+  function startResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const metrics = getResizeMetrics(event.currentTarget);
+    if (!metrics) {
+      return;
+    }
+    const resizeMetrics = metrics;
+
+    const startPosition = direction === "row" ? event.clientX : event.clientY;
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    function resize(pointerEvent: PointerEvent) {
+      const currentPosition = direction === "row" ? pointerEvent.clientX : pointerEvent.clientY;
+      applyResize(currentPosition - startPosition, resizeMetrics);
+    }
+
+    function stopResize() {
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", stopResize);
+    }
+
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", stopResize, { once: true });
+  }
+
+  function resizeWithKeyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const metrics = getResizeMetrics(event.currentTarget);
+    if (!metrics) {
+      return;
+    }
+
+    const keyDeltas: Record<string, number> = direction === "row" ? { ArrowLeft: -32, ArrowRight: 32, End: metrics.totalPixels, Home: -metrics.totalPixels } : { ArrowDown: 32, ArrowUp: -32, End: metrics.totalPixels, Home: -metrics.totalPixels };
+    const delta = keyDeltas[event.key];
+    if (delta === undefined) {
+      return;
+    }
+
+    event.preventDefault();
+    applyResize(delta, metrics);
+  }
+
+  return (
+    <div
+      aria-label={`Resize ${group.id} panes`}
+      aria-orientation={direction === "row" ? "vertical" : "horizontal"}
+      className={`resize-sash resize-sash--${direction}`}
+      onKeyDown={resizeWithKeyboard}
+      onPointerDown={startResize}
+      role="separator"
+      tabIndex={0}
+    />
+  );
+}
+
+function TerminalPaneView({ pane }: { pane: TerminalPane | undefined }) {
+  if (!pane) {
+    return null;
+  }
+
+  return (
+    <article className="terminal-pane" aria-label={`${pane.title} terminal`}>
+      <header className="terminal-pane__header">
+        <span className="terminal-pane__title">
+          <AgentDeckIcon name="terminal" size={14} />
+          {pane.title}
+        </span>
+        <span className={`terminal-pane__status terminal-pane__status--${pane.tone}`}>{pane.status}</span>
+      </header>
+      <div className="terminal-pane__body">
+        <p className="terminal-pane__command">$ {pane.command}</p>
+        <p>{pane.detail}</p>
+        <div className="terminal-pane__lines" aria-hidden="true">
+          <span>&gt; context.get_project_context</span>
+          <span>&gt; todo.list --workspace current</span>
+          <span>&gt; ready for shared-state operations</span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export function resizeSplitGroup(layout: SplitNode, groupId: string, index: number, deltaPixels: number, totalPixels: number, minBeforePixels: number, minAfterPixels = minBeforePixels): SplitNode {
+  if (layout.type === "terminal") {
+    return layout;
+  }
+
+  if (layout.id === groupId) {
+    return {
+      ...layout,
+      sizes: resizeAdjacentSizes(layout.sizes, index, deltaPixels, totalPixels, minBeforePixels, minAfterPixels),
+    };
+  }
+
+  return {
+    ...layout,
+    children: layout.children.map((child) => resizeSplitGroup(child, groupId, index, deltaPixels, totalPixels, minBeforePixels, minAfterPixels)),
+  };
+}
+
+export function resizeAdjacentSizes(sizes: number[], index: number, deltaPixels: number, totalPixels: number, minBeforePixels: number, minAfterPixels = minBeforePixels) {
+  const before = sizes[index];
+  const after = sizes[index + 1];
+  if (before === undefined || after === undefined || totalPixels <= 0) {
+    return sizes;
+  }
+
+  const combined = before + after;
+  let minBeforeRatio = minBeforePixels / totalPixels;
+  let minAfterRatio = minAfterPixels / totalPixels;
+  if (minBeforeRatio + minAfterRatio > combined) {
+    const scale = combined / (minBeforeRatio + minAfterRatio);
+    minBeforeRatio *= scale;
+    minAfterRatio *= scale;
+  }
+
+  const deltaRatio = deltaPixels / totalPixels;
+  const nextBefore = Math.min(Math.max(before + deltaRatio, minBeforeRatio), combined - minAfterRatio);
+  const nextAfter = combined - nextBefore;
+
+  return sizes.map((size, sizeIndex) => {
+    if (sizeIndex === index) {
+      return nextBefore;
+    }
+
+    if (sizeIndex === index + 1) {
+      return nextAfter;
+    }
+
+    return size;
+  });
+}
+
+function getChildStyle(parent: SplitGroup, child: SplitNode, index: number): CSSProperties {
+  const basis = `${(parent.sizes[index] ?? 1 / parent.children.length) * 100}%`;
+
+  if (parent.direction === "row") {
+    return {
+      flexBasis: basis,
+      minWidth: getSubtreeMinPixels(child, "width"),
+    };
+  }
+
+  return {
+    flexBasis: basis,
+    minHeight: getSubtreeMinPixels(child, "height"),
+  };
+}
+
+function getSubtreeMinPixels(node: SplitNode | undefined, dimension: "width" | "height"): number {
+  if (!node) {
+    return dimension === "width" ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT;
+  }
+
+  if (node.type === "terminal") {
+    return dimension === "width" ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT;
+  }
+
+  if ((node.direction === "row" && dimension === "width") || (node.direction === "column" && dimension === "height")) {
+    return node.children.reduce((minimum, child) => minimum + getSubtreeMinPixels(child, dimension), 0);
+  }
+
+  return Math.max(...node.children.map((child) => getSubtreeMinPixels(child, dimension)));
 }
 
 function ResourcePage({ page }: { page: Exclude<Page, "terminal"> }) {
   if (page === "docs") {
     return (
-      <ResourceShell icon="note" kicker="Shared Docs" title="Docs" description="Project documentation stays outside the terminal canvas so panes remain focused on agent work.">
+      <section className="resource-page" aria-label="Docs">
+        <ResourceHeader icon="note" label="Docs" description="Project documents that agents can read without crowding the terminal surface." />
         <div className="resource-grid">
           {docs.map((doc) => (
             <article className="resource-card" key={doc.path}>
@@ -247,13 +359,14 @@ function ResourcePage({ page }: { page: Exclude<Page, "terminal"> }) {
             </article>
           ))}
         </div>
-      </ResourceShell>
+      </section>
     );
   }
 
   if (page === "todos") {
     return (
-      <ResourceShell icon="task" kicker="Shared Todos" title="Todos" description="A shared task lane for CLI agents and humans working in the same local project.">
+      <section className="resource-page" aria-label="Todos">
+        <ResourceHeader icon="task" label="Todos" description="Shared project work that stays available to humans and local agents." />
         <ol className="todo-list">
           {todos.map((todo, index) => (
             <li key={todo}>
@@ -262,12 +375,13 @@ function ResourcePage({ page }: { page: Exclude<Page, "terminal"> }) {
             </li>
           ))}
         </ol>
-      </ResourceShell>
+      </section>
     );
   }
 
   return (
-    <ResourceShell icon="brain" kicker="Memory Vault" title="Memory" description="Durable workspace facts and decisions that agents can retrieve through MCP.">
+    <section className="resource-page" aria-label="Memory">
+      <ResourceHeader icon="brain" label="Memory" description="Durable workspace facts and decisions retrieved through MCP." />
       <div className="memory-list">
         {memories.map((memory) => (
           <article className="memory-card" key={memory.text}>
@@ -276,58 +390,22 @@ function ResourcePage({ page }: { page: Exclude<Page, "terminal"> }) {
           </article>
         ))}
       </div>
-    </ResourceShell>
+    </section>
   );
 }
 
-function ResourceShell({
-  children,
-  description,
-  icon,
-  kicker,
-  title,
-}: {
-  children: React.ReactNode;
-  description: string;
-  icon: AgentDeckIconName;
-  kicker: string;
-  title: string;
-}) {
+function ResourceHeader({ description, icon, label }: { description: string; icon: AgentDeckIconName; label: string }) {
   return (
-    <div className="resource-page">
-      <header className="page-heading">
-        <span className="section-kicker section-kicker--with-icon">
-          <AgentDeckIcon name={icon} size={15} />
-          {kicker}
-        </span>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </header>
-      <section className="resource-panel">{children}</section>
-    </div>
+    <header className="resource-header">
+      <span>
+        <AgentDeckIcon name={icon} size={16} />
+        {label}
+      </span>
+      <p>{description}</p>
+    </header>
   );
 }
 
-function useElementWidth(ref: React.RefObject<HTMLElement | null>, fallbackWidth: number) {
-  const [width, setWidth] = useState(fallbackWidth);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element || typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const observer = new ResizeObserver(([entry]) => {
-      if (!entry) {
-        return;
-      }
-
-      setWidth(Math.max(Math.floor(entry.contentRect.width), 320));
-    });
-
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [ref]);
-
-  return width;
+function getNodeKey(node: SplitNode) {
+  return node.type === "terminal" ? node.id : node.id;
 }
