@@ -1,26 +1,59 @@
-import { AgentDeckIcon } from "./Icon.js";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Responsive, type Layout, type ResponsiveLayouts } from "react-grid-layout";
+import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 
-const layoutModes = [
-  { id: "quad", label: "Grid" },
-  { id: "columns", label: "Columns" },
-  { id: "rows", label: "Rows" },
-  { id: "focus-left", label: "Focus" },
-] as const;
+type Page = "terminal" | "docs" | "todos" | "memory";
+type PaneTone = "success" | "neutral" | "warn";
 
-type LayoutMode = (typeof layoutModes)[number]["id"];
+interface TerminalPane {
+  id: string;
+  title: string;
+  detail: string;
+  status: string;
+  tone: PaneTone;
+}
 
-const workspaces = [
-  { name: "AgentDeck", path: "D:/projects/AgentDeck", status: "LIVE", panes: "04", todos: "07" },
-  { name: "OpenCode Lab", path: "~/labs/opencode", status: "IDLE", panes: "03", todos: "02" },
-  { name: "Docs Maintainer", path: "~/oss/docs", status: "SYNC", panes: "02", todos: "11" },
+const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
+  { id: "terminal", label: "Terminal", icon: "terminal" },
+  { id: "docs", label: "Docs", icon: "note" },
+  { id: "todos", label: "Todos", icon: "task" },
+  { id: "memory", label: "Memory", icon: "brain" },
 ];
 
-const initialPanes = [
-  { id: "TERM-01", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "RUNNING", statusTone: "success", kind: "terminal" },
-  { id: "TERM-02", title: "Dev Server", detail: "corepack pnpm dev", status: "IDLE", statusTone: "neutral", kind: "terminal" },
-  { id: "TERM-03", title: "Tests", detail: "vitest watch", status: "EXIT 0", statusTone: "success", kind: "terminal" },
-  { id: "DOC-04", title: "Workspace Notes", detail: "AGENTS.md · shared instructions", status: "PINNED", statusTone: "neutral", kind: "note" },
+const terminalPanes: TerminalPane[] = [
+  { id: "TERM-01", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "RUNNING", tone: "success" },
+  { id: "TERM-02", title: "Dev Server", detail: "corepack pnpm dev", status: "IDLE", tone: "neutral" },
+  { id: "TERM-03", title: "Tests", detail: "vitest watch", status: "EXIT 0", tone: "success" },
+  { id: "TERM-04", title: "Scratch", detail: "local commands · permissioned", status: "READY", tone: "warn" },
+];
+
+export const initialTerminalLayout: Layout = [
+  { i: "TERM-01", x: 0, y: 0, w: 6, h: 7, minW: 3, minH: 4 },
+  { i: "TERM-02", x: 6, y: 0, w: 6, h: 4, minW: 3, minH: 3 },
+  { i: "TERM-03", x: 6, y: 4, w: 3, h: 3, minW: 3, minH: 3 },
+  { i: "TERM-04", x: 9, y: 4, w: 3, h: 3, minW: 3, minH: 3 },
+];
+
+export const initialTerminalLayouts: ResponsiveLayouts<"desktop" | "tablet" | "mobile"> = {
+  desktop: initialTerminalLayout,
+  tablet: [
+    { i: "TERM-01", x: 0, y: 0, w: 6, h: 6, minW: 2, minH: 4 },
+    { i: "TERM-02", x: 0, y: 6, w: 6, h: 4, minW: 2, minH: 3 },
+    { i: "TERM-03", x: 0, y: 10, w: 3, h: 3, minW: 2, minH: 3 },
+    { i: "TERM-04", x: 3, y: 10, w: 3, h: 3, minW: 2, minH: 3 },
+  ],
+  mobile: [
+    { i: "TERM-01", x: 0, y: 0, w: 1, h: 6, minW: 1, minH: 4 },
+    { i: "TERM-02", x: 0, y: 6, w: 1, h: 4, minW: 1, minH: 3 },
+    { i: "TERM-03", x: 0, y: 10, w: 1, h: 3, minW: 1, minH: 3 },
+    { i: "TERM-04", x: 0, y: 13, w: 1, h: 3, minW: 1, minH: 3 },
+  ],
+};
+
+const docs = [
+  { title: "Product Requirements", path: "docs/PRD.md", summary: "Local-first workspace scope, agent surfaces, and V1 boundaries." },
+  { title: "MCP Contract", path: "docs/MCP_CONTRACT.md", summary: "Shared tools and resources exposed to coding agents over stdio." },
+  { title: "Architecture", path: "docs/ARCHITECTURE.md", summary: "Desktop shell, shared state package, and MCP server responsibilities." },
 ];
 
 const todos = [
@@ -37,120 +70,116 @@ const memories = [
 ];
 
 export function App() {
-  const [panes, setPanes] = useState(initialPanes);
-  const [draggedPaneId, setDraggedPaneId] = useState<string | null>(null);
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>("quad");
-
-  function movePane(targetPaneId: string) {
-    if (!draggedPaneId || draggedPaneId === targetPaneId) {
-      return;
-    }
-
-    setPanes((currentPanes) => moveItemBefore(currentPanes, draggedPaneId, targetPaneId));
-  }
-
-  function movePaneByOffset(paneId: string, offset: number) {
-    setPanes((currentPanes) => {
-      const currentIndex = currentPanes.findIndex((pane) => pane.id === paneId);
-      const targetIndex = currentIndex + offset;
-
-      if (currentIndex < 0 || targetIndex < 0 || targetIndex >= currentPanes.length) {
-        return currentPanes;
-      }
-
-      const nextPanes = [...currentPanes];
-      const [pane] = nextPanes.splice(currentIndex, 1);
-      if (!pane) {
-        return currentPanes;
-      }
-
-      nextPanes.splice(targetIndex, 0, pane);
-      return nextPanes;
-    });
-  }
+  const [activePage, setActivePage] = useState<Page>("terminal");
+  const [layouts, setLayouts] = useState(initialTerminalLayouts);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const canvasWidth = useElementWidth(canvasRef, 1180);
 
   return (
     <main className="ops-shell" aria-label="AgentDeck workspace deck">
-      <TopRail />
-      <aside className="workspace-dock" aria-label="Saved workspaces">
-        <div className="dock-heading">
-          <h2 className="section-kicker">Workspaces</h2>
-          <button className="icon-button" type="button" aria-label="Workspace settings">
-            <AgentDeckIcon name="settings" size={17} />
-          </button>
+      <aside className="app-sidebar" aria-label="Primary navigation">
+        <div className="sidebar-brand" aria-label="AgentDeck">
+          <AgentDeckIcon name="sparkles" size={22} />
         </div>
-        <h1>AgentDeck</h1>
-        <p className="dock-copy">A calm command center for saved panes, shared context, and CLI coding agents.</p>
-        <div className="dock-list">
-          {workspaces.map((workspace) => (
-            <button className="workspace-row" key={workspace.name} type="button">
-              <span className="workspace-row__status">
-                <AgentDeckIcon name="folder" size={16} />
-                {workspace.status}
-              </span>
-              <span>
-                <strong>{workspace.name}</strong>
-                <small>{workspace.path}</small>
-              </span>
-              <span className="workspace-row__meta">{workspace.panes}P/{workspace.todos}T</span>
+        <nav className="sidebar-nav" aria-label="Workspace pages">
+          {navItems.map((item) => (
+            <button
+              aria-label={item.label}
+              aria-pressed={activePage === item.id}
+              className="sidebar-nav__item"
+              key={item.id}
+              onClick={() => setActivePage(item.id)}
+              title={item.label}
+              type="button"
+            >
+              <AgentDeckIcon name={item.icon} size={20} />
+              <span>{item.label}</span>
             </button>
           ))}
-        </div>
+        </nav>
+        <button className="sidebar-nav__item sidebar-nav__item--utility" type="button" aria-label="Settings" title="Settings">
+          <AgentDeckIcon name="settings" size={20} />
+          <span>Settings</span>
+        </button>
       </aside>
 
-      <section className="main-workspace" aria-label="Workspace canvas">
-        <div className="layout-toolbar" aria-label="Pane layout presets">
-          <span className="layout-toolbar__label">
-            <AgentDeckIcon name="layout" size={16} />
-            Layout
-          </span>
-          <div className="layout-switcher" role="group" aria-label="Choose pane layout" aria-describedby="layout-hint">
-            {layoutModes.map((layout) => (
-              <button
-                aria-pressed={layoutMode === layout.id}
-                className="layout-button"
-                key={layout.id}
-                onClick={() => setLayoutMode(layout.id)}
-                type="button"
-              >
-                {layout.label}
-              </button>
-            ))}
-          </div>
-          <span className="layout-toolbar__hint" id="layout-hint">Drag handles reorder panes. Presets keep panes inside the grid.</span>
-        </div>
+      <section className="workspace-stage" aria-label="Workspace content">
+        {activePage === "terminal" ? (
+          <TerminalPage canvasRef={canvasRef} layouts={layouts} onLayoutsChange={setLayouts} width={canvasWidth} />
+        ) : (
+          <ResourcePage page={activePage} />
+        )}
+      </section>
+    </main>
+  );
+}
 
-        <div className="pane-grid" data-layout={layoutMode} aria-label="Workspace panes">
-          {panes.map((pane) => (
-            <article
-              className="pane-frame"
-              key={pane.id}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => movePane(pane.id)}
-            >
+function TerminalPage({
+  canvasRef,
+  layouts,
+  onLayoutsChange,
+  width,
+}: {
+  canvasRef: React.RefObject<HTMLDivElement | null>;
+  layouts: ResponsiveLayouts<"desktop" | "tablet" | "mobile">;
+  onLayoutsChange: (layouts: ResponsiveLayouts<"desktop" | "tablet" | "mobile">) => void;
+  width: number;
+}) {
+  const breakpoint = getBreakpoint(width);
+
+  function nudgePane(paneId: string, dx: number, dy: number) {
+    onLayoutsChange(nudgePaneInLayouts(layouts, paneId, dx, dy));
+  }
+
+  return (
+    <div className="terminal-page">
+      <header className="page-heading">
+        <span className="section-kicker section-kicker--with-icon">
+          <AgentDeckIcon name="layout" size={15} />
+          Dynamic Pane Canvas
+        </span>
+        <h1>Terminals</h1>
+        <p>Drag pane headers and pull resize handles. The grid packs panes without overlap or hidden stacking.</p>
+      </header>
+
+      <div className="pane-canvas" ref={canvasRef} aria-label="Workspace panes">
+        <Responsive
+          breakpoint={breakpoint}
+          breakpoints={{ desktop: 960, mobile: 0, tablet: 640 }}
+          className="pane-grid"
+          cols={{ desktop: 12, mobile: 1, tablet: 6 }}
+          dragConfig={{ bounded: true, handle: ".pane-drag-handle" }}
+          layouts={layouts}
+          margin={[12, 12]}
+          onLayoutChange={(_nextLayout, nextLayouts) => onLayoutsChange(copyLayouts(nextLayouts))}
+          resizeConfig={{ handles: ["se", "e", "s"] }}
+          rowHeight={42}
+          width={width}
+        >
+          {terminalPanes.map((pane) => (
+            <article className="pane-frame" key={pane.id}>
               <header className="pane-header">
                 <span className="pane-header__id">
-                  <button
-                    aria-label={`Drag ${pane.title} pane`}
-                    className="pane-drag-handle"
-                    draggable
-                    onDragEnd={() => setDraggedPaneId(null)}
-                    onDragStart={() => setDraggedPaneId(pane.id)}
-                    type="button"
-                  >
+                  <button aria-label={`Drag ${pane.title} pane`} className="pane-drag-handle" type="button">
                     <AgentDeckIcon name="drag" size={15} />
                   </button>
-                  <AgentDeckIcon name={pane.kind === "note" ? "note" : "terminal"} size={15} />
+                  <AgentDeckIcon name="terminal" size={15} />
                   {pane.id}
                 </span>
                 <span className="pane-actions">
-                  <button type="button" aria-label={`Move ${pane.title} left`} onClick={() => movePaneByOffset(pane.id, -1)}>
+                  <button type="button" aria-label={`Move ${pane.title} left`} onClick={() => nudgePane(pane.id, -1, 0)}>
                     ←
                   </button>
-                  <button type="button" aria-label={`Move ${pane.title} right`} onClick={() => movePaneByOffset(pane.id, 1)}>
+                  <button type="button" aria-label={`Move ${pane.title} right`} onClick={() => nudgePane(pane.id, 1, 0)}>
                     →
                   </button>
-                  <span className={`pane-status pane-status--${pane.statusTone}`}>{pane.status}</span>
+                  <button type="button" aria-label={`Move ${pane.title} up`} onClick={() => nudgePane(pane.id, 0, -1)}>
+                    ↑
+                  </button>
+                  <button type="button" aria-label={`Move ${pane.title} down`} onClick={() => nudgePane(pane.id, 0, 1)}>
+                    ↓
+                  </button>
+                  <span className={`pane-status pane-status--${pane.tone}`}>{pane.status}</span>
                 </span>
               </header>
               <div className="pane-body">
@@ -164,84 +193,141 @@ export function App() {
               </div>
             </article>
           ))}
+        </Responsive>
+      </div>
+    </div>
+  );
+}
+
+export function nudgePaneInLayouts<B extends string>(layouts: ResponsiveLayouts<B>, paneId: string, dx: number, dy: number): ResponsiveLayouts<B> {
+  return Object.fromEntries(
+    Object.entries(layouts).map(([breakpoint, layout]) => [
+      breakpoint,
+      (layout as Layout).map((item) => {
+        if (item.i !== paneId) {
+          return item;
+        }
+
+        return {
+          ...item,
+          x: Math.max(0, item.x + dx),
+          y: Math.max(0, item.y + dy),
+        };
+      }),
+    ]),
+  ) as unknown as ResponsiveLayouts<B>;
+}
+
+function copyLayouts<B extends string>(layouts: ResponsiveLayouts<B>): ResponsiveLayouts<B> {
+  return Object.fromEntries(Object.entries(layouts).map(([breakpoint, layout]) => [breakpoint, [...(layout as Layout)]])) as unknown as ResponsiveLayouts<B>;
+}
+
+function getBreakpoint(width: number) {
+  if (width >= 960) {
+    return "desktop";
+  }
+
+  if (width >= 640) {
+    return "tablet";
+  }
+
+  return "mobile";
+}
+
+function ResourcePage({ page }: { page: Exclude<Page, "terminal"> }) {
+  if (page === "docs") {
+    return (
+      <ResourceShell icon="note" kicker="Shared Docs" title="Docs" description="Project documentation stays outside the terminal canvas so panes remain focused on agent work.">
+        <div className="resource-grid">
+          {docs.map((doc) => (
+            <article className="resource-card" key={doc.path}>
+              <span>{doc.path}</span>
+              <h2>{doc.title}</h2>
+              <p>{doc.summary}</p>
+            </article>
+          ))}
         </div>
-      </section>
-
-      <aside className="context-deck" aria-label="Shared context deck">
-        <section className="deck-panel">
-          <h2 className="section-kicker section-kicker--with-icon">
-            <AgentDeckIcon name="task" size={15} />
-            Shared Todos
-          </h2>
-          <ol className="todo-list">
-            {todos.map((todo, index) => (
-              <li key={todo}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                {todo}
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <section className="deck-panel">
-          <h2 className="section-kicker section-kicker--with-icon">
-            <AgentDeckIcon name="brain" size={15} />
-            Memory Vault
-          </h2>
-          <div className="memory-list">
-            {memories.map((memory) => (
-              <article className="memory-card" key={memory.text}>
-                <span>{memory.label}</span>
-                <p>{memory.text}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-      </aside>
-
-      <footer className="event-strip" aria-label="Workspace event stream">
-        <span>MCP: STDIO READY</span>
-        <span>STORE: LOCKED WRITES + ATOMIC STATE</span>
-        <span>BRANCH: DEVELOPMENT</span>
-        <span>LAYOUT: {layoutMode.toUpperCase()} / MANAGED GRID</span>
-      </footer>
-    </main>
-  );
-}
-
-export function moveItemBefore<T extends { id: string }>(items: T[], draggedId: string, targetId: string): T[] {
-  const draggedIndex = items.findIndex((item) => item.id === draggedId);
-  const targetIndex = items.findIndex((item) => item.id === targetId);
-
-  if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) {
-    return items;
+      </ResourceShell>
+    );
   }
 
-  const nextItems = [...items];
-  const [draggedItem] = nextItems.splice(draggedIndex, 1);
-  if (!draggedItem) {
-    return items;
+  if (page === "todos") {
+    return (
+      <ResourceShell icon="task" kicker="Shared Todos" title="Todos" description="A shared task lane for CLI agents and humans working in the same local project.">
+        <ol className="todo-list">
+          {todos.map((todo, index) => (
+            <li key={todo}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              {todo}
+            </li>
+          ))}
+        </ol>
+      </ResourceShell>
+    );
   }
 
-  const insertionIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
-  nextItems.splice(insertionIndex, 0, draggedItem);
-  return nextItems;
-}
-
-function TopRail() {
   return (
-    <header className="top-rail">
-      <span className="rail-brand">
-        <AgentDeckIcon name="sparkles" size={18} />
-        AgentDeck
-      </span>
-      <span className="rail-path">D:/projects/Projects-batch3/AgentDeck</span>
-      <span className="rail-status">MCP Local</span>
-      <button className="command-button" type="button">
-        <AgentDeckIcon name="search" size={16} />
-        Search or command
-        <kbd>Ctrl K</kbd>
-      </button>
-    </header>
+    <ResourceShell icon="brain" kicker="Memory Vault" title="Memory" description="Durable workspace facts and decisions that agents can retrieve through MCP.">
+      <div className="memory-list">
+        {memories.map((memory) => (
+          <article className="memory-card" key={memory.text}>
+            <span>{memory.label}</span>
+            <p>{memory.text}</p>
+          </article>
+        ))}
+      </div>
+    </ResourceShell>
   );
+}
+
+function ResourceShell({
+  children,
+  description,
+  icon,
+  kicker,
+  title,
+}: {
+  children: React.ReactNode;
+  description: string;
+  icon: AgentDeckIconName;
+  kicker: string;
+  title: string;
+}) {
+  return (
+    <div className="resource-page">
+      <header className="page-heading">
+        <span className="section-kicker section-kicker--with-icon">
+          <AgentDeckIcon name={icon} size={15} />
+          {kicker}
+        </span>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </header>
+      <section className="resource-panel">{children}</section>
+    </div>
+  );
+}
+
+function useElementWidth(ref: React.RefObject<HTMLElement | null>, fallbackWidth: number) {
+  const [width, setWidth] = useState(fallbackWidth);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) {
+        return;
+      }
+
+      setWidth(Math.max(Math.floor(entry.contentRect.width), 320));
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return width;
 }

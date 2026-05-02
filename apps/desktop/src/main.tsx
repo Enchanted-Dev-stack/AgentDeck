@@ -4,6 +4,7 @@ import "@fontsource/outfit/400.css";
 import "@fontsource/outfit/500.css";
 import "@fontsource/outfit/600.css";
 import "@fontsource/outfit/700.css";
+import "react-grid-layout/css/styles.css";
 import { App } from "./ui/App.js";
 import "./styles.css";
 
