@@ -11,11 +11,12 @@
   --color-accent-warn: #d6a84f;
   --color-accent-danger: #ff3b30;
   --color-accent-info: #7db7c7;
+  --font-display: "Cabinet Grotesk", "CabinetGrotesk", Outfit, system-ui, sans-serif;
+  --font-body: Outfit, Inter, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
-  --font-sans: Archivo, Inter, system-ui, sans-serif;
   color: var(--color-text);
   background: var(--color-bg);
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
 }
 
 * {
@@ -94,22 +95,30 @@ button {
 }
 
 .section-kicker {
+  align-items: center;
   color: var(--color-text-dim);
+  display: flex;
   font-family: var(--font-mono);
   font-size: 10px;
+  gap: 8px;
   letter-spacing: 0.16em;
   margin-bottom: 12px;
   margin-top: 0;
   text-transform: uppercase;
 }
 
+.section-kicker--with-icon {
+  color: var(--color-text-muted);
+}
+
 h1 {
-  font-family: var(--font-mono);
+  font-family: var(--font-display);
   font-size: clamp(36px, 5vw, 64px);
   letter-spacing: -0.08em;
   line-height: 0.9;
   margin: 0 0 24px;
   text-transform: uppercase;
+  font-weight: 900;
 }
 
 .dock-list,
@@ -147,6 +156,12 @@ h1 {
   white-space: nowrap;
 }
 
+.workspace-row strong {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
 .workspace-row small,
 .workspace-row__meta {
   color: var(--color-text-dim);
@@ -155,9 +170,19 @@ h1 {
 }
 
 .workspace-row__status {
+  align-items: center;
   color: var(--color-accent-live);
+  display: grid;
+  gap: 4px;
+  justify-items: start;
   font-family: var(--font-mono);
   font-size: 10px;
+}
+
+.pane-header__id {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
 }
 
 .pane-grid {
@@ -201,7 +226,9 @@ h1 {
 
 .pane-title {
   color: var(--color-text);
+  font-family: var(--font-display);
   font-size: 18px;
+  font-weight: 800;
   letter-spacing: -0.04em;
   margin: 0 0 6px;
   text-transform: uppercase;

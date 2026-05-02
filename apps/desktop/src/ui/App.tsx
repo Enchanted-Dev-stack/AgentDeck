@@ -1,3 +1,5 @@
+import { AgentDeckIcon } from "./Icon.js";
+
 const workspaces = [
   { name: "AgentDeck", path: "D:/projects/AgentDeck", status: "LIVE", panes: "04", todos: "07" },
   { name: "OpenCode Lab", path: "~/labs/opencode", status: "IDLE", panes: "03", todos: "02" },
@@ -34,7 +36,10 @@ export function App() {
         <div className="dock-list">
           {workspaces.map((workspace) => (
             <button className="workspace-row" key={workspace.name} type="button">
-              <span className="workspace-row__status">{workspace.status}</span>
+              <span className="workspace-row__status">
+                <AgentDeckIcon name="folder" size={16} />
+                {workspace.status}
+              </span>
               <span>
                 <strong>{workspace.name}</strong>
                 <small>{workspace.path}</small>
@@ -49,7 +54,10 @@ export function App() {
         {panes.map((pane) => (
           <article className="pane-frame" key={pane.id}>
             <header className="pane-header">
-              <span>{pane.id}</span>
+              <span className="pane-header__id">
+                <AgentDeckIcon name={pane.id.startsWith("DOC") ? "note" : "terminal"} size={15} />
+                {pane.id}
+              </span>
               <span>{pane.status}</span>
             </header>
             <div className="pane-body">
@@ -67,7 +75,10 @@ export function App() {
 
       <aside className="context-deck" aria-label="Shared context deck">
         <section className="deck-panel">
-          <h2 className="section-kicker">Shared Todos</h2>
+          <h2 className="section-kicker section-kicker--with-icon">
+            <AgentDeckIcon name="task" size={15} />
+            Shared Todos
+          </h2>
           <ol className="todo-list">
             {todos.map((todo, index) => (
               <li key={todo}>
@@ -79,7 +90,10 @@ export function App() {
         </section>
 
         <section className="deck-panel">
-          <h2 className="section-kicker">Memory Vault</h2>
+          <h2 className="section-kicker section-kicker--with-icon">
+            <AgentDeckIcon name="brain" size={15} />
+            Memory Vault
+          </h2>
           <div className="memory-list">
             {memories.map((memory) => (
               <article className="memory-card" key={memory.text}>
