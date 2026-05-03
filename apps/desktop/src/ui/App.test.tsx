@@ -148,7 +148,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ name: "AgentDeck Workspace", version: 1, nextTerminalIndex: 5 });
+    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 2, nextTerminalIndex: 5 });
+    expect((savedDocuments[0] as { tabs: unknown[] }).tabs).toHaveLength(1);
   });
 
   test("imports a workspace and closes existing sessions", async () => {
@@ -158,13 +159,21 @@ describe("App", () => {
       workspace: {
         importWorkspace: () =>
           Promise.resolve({
-            layout: { id: "term-9", type: "terminal" },
+            activeTabId: "tab-9",
             name: "Imported",
+            nextTabIndex: 10,
             nextTerminalIndex: 10,
-            panes: {
-              "term-9": { command: "shell", detail: "imported", id: "term-9", status: "ready", title: "Imported Shell", tone: "neutral" },
-            },
-            version: 1,
+            tabs: [
+              {
+                id: "tab-9",
+                layout: { id: "term-9", type: "terminal" },
+                panes: {
+                  "term-9": { command: "shell", detail: "imported", id: "term-9", status: "ready", title: "Imported Shell", tone: "neutral" },
+                },
+                title: "Imported Tab",
+              },
+            ],
+            version: 2,
           }),
         saveWorkspace: () => Promise.resolve(true),
       },
@@ -177,6 +186,43 @@ describe("App", () => {
     expect(screen.queryByLabelText("OpenCode terminal")).toBeNull();
     expect(closeSession).toHaveBeenCalledWith("term-1");
     expect(closeSession).toHaveBeenCalledWith("term-4");
+  });
+
+  test("creates and switches terminal tabs", () => {
+    render(<App />);
+
+    expect(screen.getByRole("tab", { name: /Main/ }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "New terminal tab" }));
+
+    expect(screen.getByRole("tab", { name: /Tab 2/ }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Main/ }));
+    expect(screen.getByRole("tab", { name: /Main/ }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByLabelText("OpenCode terminal")).toBeTruthy();
+  });
+
+  test("renames a terminal tab", () => {
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("Build");
+    render(<App />);
+
+    fireEvent.doubleClick(screen.getByRole("tab", { name: /Main/ }));
+
+    expect(prompt).toHaveBeenCalledWith("Rename tab", "Main");
+    expect(screen.getByRole("tab", { name: /Build/ })).toBeTruthy();
+  });
+
+  test("closes a terminal tab and its sessions", () => {
+    const closeSession = vi.fn(() => Promise.resolve(true));
+    window.agentDeck = createFakeBridge({ closeSession });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "New terminal tab" }));
+    fireEvent.click(screen.getByLabelText("Close Tab 2 tab"));
+
+    expect(closeSession).toHaveBeenCalledWith("term-5");
+    expect(screen.queryByRole("tab", { name: /Tab 2/ })).toBeNull();
+    expect(screen.getByRole("tab", { name: /Main/ }).getAttribute("aria-selected")).toBe("true");
   });
 
   test("opens and dismisses the terminal menu from the keyboard", () => {

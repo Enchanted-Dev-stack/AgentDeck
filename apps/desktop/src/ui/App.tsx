@@ -31,6 +31,13 @@ interface TerminalPane {
   command: string;
 }
 
+interface TerminalTab {
+  id: string;
+  layout: SplitNode | null;
+  panes: Record<string, TerminalPane>;
+  title: string;
+}
+
 interface ContextMenuState {
   terminalId: string;
   x: number;
@@ -86,6 +93,15 @@ export const initialSplitLayout: SplitNode = {
   ],
 };
 
+const initialTerminalTabs: TerminalTab[] = [
+  {
+    id: "tab-1",
+    layout: initialSplitLayout,
+    panes: initialTerminalPanes,
+    title: "Main",
+  },
+];
+
 const docs = [
   { title: "Product requirements", path: "docs/PRD.md", summary: "Local-first workspace scope, agent surfaces, and V1 boundaries." },
   { title: "MCP contract", path: "docs/MCP_CONTRACT.md", summary: "Shared tools and resources exposed to coding agents over stdio." },
@@ -112,10 +128,12 @@ export function App() {
   const [selectedTerminalIds, setSelectedTerminalIds] = useState<Set<string>>(new Set());
   const [workspaceName, setWorkspaceName] = useState("AgentDeck Workspace");
   const [terminalState, setTerminalState] = useState({
-    layout: initialSplitLayout as SplitNode | null,
+    activeTabId: "tab-1",
+    nextTabIndex: 2,
     nextTerminalIndex: 5,
-    panes: initialTerminalPanes,
+    tabs: initialTerminalTabs,
   });
+  const activeTab = terminalState.tabs.find((tab) => tab.id === terminalState.activeTabId) ?? terminalState.tabs[0] ?? createTerminalTab("tab-1", 1, 1);
 
   function addTerminal(targetId: string | undefined, side: TerminalSide = "right") {
     addTerminalToSide(targetId ? [targetId] : [], side);
@@ -123,49 +141,55 @@ export function App() {
 
   function addTerminalToSide(targetIds: string[], side: TerminalSide) {
     setTerminalState((currentState) => {
-      if (currentState.layout && !canInsertTerminalOnSide(currentState.layout, targetIds)) {
+      const currentTab = getActiveTab(currentState.tabs, currentState.activeTabId);
+      if (!currentTab || (currentTab.layout && !canInsertTerminalOnSide(currentTab.layout, targetIds))) {
         return currentState;
       }
 
       const terminalIndex = currentState.nextTerminalIndex;
       const terminalId = `term-${terminalIndex}`;
-
-      return {
-        layout: insertTerminalOnSide(currentState.layout, targetIds, terminalId, side),
-        nextTerminalIndex: terminalIndex + 1,
+      const nextTab = {
+        ...currentTab,
+        layout: insertTerminalOnSide(currentTab.layout, targetIds, terminalId, side),
         panes: {
-          ...currentState.panes,
+          ...currentTab.panes,
           [terminalId]: createTerminalPane(terminalId, terminalIndex),
         },
       };
+
+      return {
+        ...currentState,
+        nextTerminalIndex: terminalIndex + 1,
+        tabs: replaceTab(currentState.tabs, nextTab),
+      };
     });
-    setContextMenu(null);
-    setSelectedTerminalIds(new Set());
-    setSelectionAnchorId(null);
+    clearTerminalSelection();
   }
 
   function removeTerminals(terminalIds: string[]) {
     const terminalIdSet = new Set(terminalIds);
     setTerminalState((currentState) => {
-      const remainingPanes = Object.fromEntries(Object.entries(currentState.panes).filter(([paneId]) => !terminalIdSet.has(paneId)));
+      const currentTab = getActiveTab(currentState.tabs, currentState.activeTabId);
+      if (!currentTab) {
+        return currentState;
+      }
+      const remainingPanes = Object.fromEntries(Object.entries(currentTab.panes).filter(([paneId]) => !terminalIdSet.has(paneId)));
 
       return {
         ...currentState,
-        layout: terminalIds.reduce((layout, terminalId) => removeTerminalFromLayout(layout, terminalId), currentState.layout),
-        panes: remainingPanes,
+        tabs: replaceTab(currentState.tabs, {
+          ...currentTab,
+          layout: terminalIds.reduce((layout, terminalId) => removeTerminalFromLayout(layout, terminalId), currentTab.layout),
+          panes: remainingPanes,
+        }),
       };
     });
-    const bridge = getTerminalBridge();
-    for (const terminalId of terminalIds) {
-      void bridge?.closeSession(terminalId);
-    }
-    setContextMenu(null);
-    setSelectedTerminalIds(new Set());
-    setSelectionAnchorId(null);
+    closeTerminalSessions(terminalIds);
+    clearTerminalSelection();
   }
 
   function renameTerminal(terminalId: string) {
-    const currentTitle = terminalState.panes[terminalId]?.title ?? terminalId;
+    const currentTitle = activeTab.panes[terminalId]?.title ?? terminalId;
     const nextTitle = window.prompt("Rename terminal", currentTitle)?.trim().slice(0, MAX_PANE_TITLE_LENGTH);
     if (!nextTitle) {
       setContextMenu(null);
@@ -174,19 +198,118 @@ export function App() {
 
     setTerminalState((currentState) => ({
       ...currentState,
-      panes: {
-        ...currentState.panes,
-        [terminalId]: {
-          ...(currentState.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex)),
-          title: nextTitle,
-        },
-      },
+      tabs: currentState.tabs.map((tab) =>
+        tab.id === currentState.activeTabId
+          ? {
+              ...tab,
+              panes: {
+                ...tab.panes,
+                [terminalId]: {
+                  ...(tab.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex)),
+                  title: nextTitle,
+                },
+              },
+            }
+          : tab,
+      ),
     }));
     setContextMenu(null);
   }
 
+  function addTab() {
+    setTerminalState((currentState) => {
+      const tabIndex = currentState.nextTabIndex;
+      const terminalIndex = currentState.nextTerminalIndex;
+      const tab = createTerminalTab(`tab-${tabIndex}`, tabIndex, terminalIndex);
+
+      return {
+        ...currentState,
+        activeTabId: tab.id,
+        nextTabIndex: tabIndex + 1,
+        nextTerminalIndex: terminalIndex + 1,
+        tabs: [...currentState.tabs, tab],
+      };
+    });
+    clearTerminalSelection();
+    setActivePage("terminal");
+  }
+
+  function closeTab(tabId: string) {
+    const closingTab = terminalState.tabs.find((tab) => tab.id === tabId);
+    if (closingTab) {
+      closeTerminalSessions(Object.keys(closingTab.panes));
+    }
+
+    setTerminalState((currentState) => {
+      if (!currentState.tabs.some((tab) => tab.id === tabId)) {
+        return currentState;
+      }
+
+      const remainingTabs = currentState.tabs.filter((tab) => tab.id !== tabId);
+      if (remainingTabs.length === 0) {
+        const tab = createTerminalTab("tab-1", 1, currentState.nextTerminalIndex);
+        return {
+          ...currentState,
+          activeTabId: tab.id,
+          nextTabIndex: 2,
+          nextTerminalIndex: currentState.nextTerminalIndex + 1,
+          tabs: [tab],
+        };
+      }
+
+      const closingIndex = currentState.tabs.findIndex((tab) => tab.id === tabId);
+      const nextActiveTabId = currentState.activeTabId === tabId ? (remainingTabs[Math.min(closingIndex, remainingTabs.length - 1)]?.id ?? remainingTabs[0]?.id ?? currentState.activeTabId) : currentState.activeTabId;
+
+      return {
+        ...currentState,
+        activeTabId: nextActiveTabId,
+        tabs: remainingTabs,
+      };
+    });
+    clearTerminalSelection();
+  }
+
+  function renameTab(tabId: string) {
+    const currentTitle = terminalState.tabs.find((tab) => tab.id === tabId)?.title ?? tabId;
+    const nextTitle = window.prompt("Rename tab", currentTitle)?.trim().slice(0, MAX_PANE_TITLE_LENGTH);
+    if (!nextTitle) {
+      return;
+    }
+
+    setTerminalState((currentState) => ({
+      ...currentState,
+      tabs: currentState.tabs.map((tab) => (tab.id === tabId ? { ...tab, title: nextTitle } : tab)),
+    }));
+  }
+
+  function selectTab(tabId: string) {
+    setTerminalState((currentState) => ({
+      ...currentState,
+      activeTabId: currentState.tabs.some((tab) => tab.id === tabId) ? tabId : currentState.activeTabId,
+    }));
+    clearTerminalSelection();
+  }
+
+  function clearTerminalSelection() {
+    setContextMenu(null);
+    setSelectedTerminalIds(new Set());
+    setSelectionAnchorId(null);
+  }
+
+  function closeTerminalSessions(terminalIds: string[]) {
+    const bridge = getTerminalBridge();
+    for (const terminalId of terminalIds) {
+      void bridge?.closeSession(terminalId);
+    }
+  }
+
+  async function closeTerminalSessionsForTabs(tabs: TerminalTab[]) {
+    const bridge = getTerminalBridge();
+    await Promise.all(tabs.flatMap((tab) => Object.keys(tab.panes).map((terminalId) => bridge?.closeSession(terminalId) ?? Promise.resolve(false))));
+  }
+
   async function saveWorkspace() {
-    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ layout: terminalState.layout, name: workspaceName, nextTerminalIndex: terminalState.nextTerminalIndex, panes: terminalState.panes }));
+    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, tabs: terminalState.tabs }));
   }
 
   async function importWorkspace() {
@@ -195,21 +318,18 @@ export function App() {
       return;
     }
 
-    const bridge = getTerminalBridge();
-    await Promise.all(Object.keys(terminalState.panes).map((terminalId) => bridge?.closeSession(terminalId) ?? Promise.resolve(false)));
+    await closeTerminalSessionsForTabs(terminalState.tabs);
 
     setWorkspaceName(document.name);
-    setTerminalState({ layout: document.layout, nextTerminalIndex: document.nextTerminalIndex, panes: document.panes });
-    setContextMenu(null);
-    setSelectedTerminalIds(new Set());
-    setSelectionAnchorId(null);
+    setTerminalState({ activeTabId: document.activeTabId, nextTabIndex: document.nextTabIndex, nextTerminalIndex: document.nextTerminalIndex, tabs: document.tabs });
+    clearTerminalSelection();
     setActivePage("terminal");
   }
 
   function updateLayout(layout: SplitNode) {
     setTerminalState((currentState) => ({
       ...currentState,
-      layout,
+      tabs: currentState.tabs.map((tab) => (tab.id === currentState.activeTabId ? { ...tab, layout } : tab)),
     }));
   }
 
@@ -220,7 +340,7 @@ export function App() {
       return;
     }
 
-    setSelectedTerminalIds(new Set(getTerminalRange(terminalState.layout, selectionAnchorId, terminalId)));
+    setSelectedTerminalIds(new Set(getTerminalRange(activeTab.layout, selectionAnchorId, terminalId)));
   }
 
   function openTerminalMenu(terminalId: string, position: MenuPosition) {
@@ -240,7 +360,7 @@ export function App() {
   }
 
   const contextTargets = getContextTargets();
-  const canAddToContextTargets = canInsertTerminalOnSide(terminalState.layout, contextTargets);
+  const canAddToContextTargets = canInsertTerminalOnSide(activeTab.layout, contextTargets);
 
   return (
     <main className="app-shell" aria-label="AgentDeck">
@@ -277,26 +397,84 @@ export function App() {
       </aside>
 
       <section className="workspace" aria-label="Workspace content">
-        <TerminalWorkspace
-          contextMenu={contextMenu}
-          canAddToContextTargets={canAddToContextTargets}
-          contextTargets={contextTargets}
-          hidden={activePage !== "terminal"}
-          layout={terminalState.layout}
-          onAddTerminal={addTerminal}
-          onAddTerminalToSide={addTerminalToSide}
-          onCloseContextMenu={() => setContextMenu(null)}
-          onLayoutChange={updateLayout}
-          onOpenTerminalMenu={openTerminalMenu}
-          onRenameTerminal={renameTerminal}
-          onRemoveTerminals={removeTerminals}
-          onSelectTerminal={selectTerminal}
-          panes={terminalState.panes}
-          selectedTerminalIds={selectedTerminalIds}
-        />
+        <section className="terminal-page" hidden={activePage !== "terminal"}>
+          <TabStrip activeTabId={terminalState.activeTabId} onAddTab={addTab} onCloseTab={closeTab} onRenameTab={renameTab} onSelectTab={selectTab} tabs={terminalState.tabs} />
+          <div className="terminal-tab-panels">
+            {terminalState.tabs.map((tab) => {
+              const isActiveTab = tab.id === terminalState.activeTabId;
+              return (
+                <TerminalWorkspace
+                  contextMenu={isActiveTab ? contextMenu : null}
+                  canAddToContextTargets={isActiveTab ? canAddToContextTargets : false}
+                  contextTargets={isActiveTab ? contextTargets : []}
+                  hidden={!isActiveTab}
+                  key={tab.id}
+                  layout={tab.layout}
+                  onAddTerminal={addTerminal}
+                  onAddTerminalToSide={addTerminalToSide}
+                  onCloseContextMenu={() => setContextMenu(null)}
+                  onLayoutChange={updateLayout}
+                  onOpenTerminalMenu={openTerminalMenu}
+                  onRenameTerminal={renameTerminal}
+                  onRemoveTerminals={removeTerminals}
+                  onSelectTerminal={selectTerminal}
+                  panes={tab.panes}
+                  selectedTerminalIds={isActiveTab ? selectedTerminalIds : new Set()}
+                />
+              );
+            })}
+          </div>
+        </section>
         {activePage !== "terminal" ? <ResourcePage page={activePage} /> : null}
       </section>
     </main>
+  );
+}
+
+function TabStrip({ activeTabId, onAddTab, onCloseTab, onRenameTab, onSelectTab, tabs }: { activeTabId: string; onAddTab: () => void; onCloseTab: (tabId: string) => void; onRenameTab: (tabId: string) => void; onSelectTab: (tabId: string) => void; tabs: TerminalTab[] }) {
+  return (
+    <div className="tab-strip" role="tablist" aria-label="Terminal tabs">
+      <div className="tab-strip__scroll">
+        {tabs.map((tab) => {
+          const terminalCount = Object.keys(tab.panes).length;
+          return (
+            <div className="tab-strip__tab-shell" key={tab.id}>
+              <button
+                aria-selected={tab.id === activeTabId}
+                className="tab-strip__tab"
+                onClick={() => onSelectTab(tab.id)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onRenameTab(tab.id);
+                }}
+                onDoubleClick={() => onRenameTab(tab.id)}
+                role="tab"
+                title={`${tab.title} terminal tab, ${terminalCount} terminal${terminalCount === 1 ? "" : "s"}`}
+                type="button"
+              >
+                <span className="tab-strip__title">{tab.title}</span>
+                <span className="tab-strip__count">{terminalCount}</span>
+              </button>
+              <button
+                aria-label={`Close ${tab.title} tab`}
+                className="tab-strip__close"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCloseTab(tab.id);
+                }}
+                title={`Close ${tab.title} tab`}
+                type="button"
+              >
+                x
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <button aria-label="New terminal tab" className="tab-strip__add" onClick={onAddTab} title="New terminal tab" type="button">
+        <AgentDeckIcon name="add" size={15} />
+      </button>
+    </div>
   );
 }
 
@@ -801,6 +979,26 @@ function createTerminalPane(id: string, index: number): TerminalPane {
     title: `Terminal ${index}`,
     tone: "neutral",
   };
+}
+
+function createTerminalTab(id: string, tabIndex: number, terminalIndex: number): TerminalTab {
+  const terminalId = `term-${terminalIndex}`;
+  return {
+    id,
+    layout: { type: "terminal", id: terminalId },
+    panes: {
+      [terminalId]: createTerminalPane(terminalId, terminalIndex),
+    },
+    title: `Tab ${tabIndex}`,
+  };
+}
+
+function getActiveTab(tabs: TerminalTab[], activeTabId: string) {
+  return tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+}
+
+function replaceTab(tabs: TerminalTab[], nextTab: TerminalTab) {
+  return tabs.map((tab) => (tab.id === nextTab.id ? nextTab : tab));
 }
 
 function createSplitGroup(id: string, direction: SplitDirection, children: SplitNode[], sizes = children.map(() => 1 / children.length)): SplitGroup {

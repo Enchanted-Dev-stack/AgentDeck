@@ -329,13 +329,13 @@ app.whenReady().then(() => {
   const window = createWindow();
 
   if (process.env.AGENTDECK_SMOKE_TEST === "1") {
-    const fallbackTimer = setTimeout(() => app.exit(1), 5_000);
+    const fallbackTimer = setTimeout(() => process.exit(1), 5_000);
     window.webContents.once("did-finish-load", async () => {
       const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.terminal && window.agentDeck?.workspace)");
       console.log(`AgentDeck preload bridge: ${hasBridge ? "available" : "missing"}`);
       setTimeout(() => {
         clearTimeout(fallbackTimer);
-        app.exit(hasBridge ? 0 : 1);
+        process.exit(hasBridge ? 0 : 1);
       }, 1_000);
     });
   }

@@ -25,6 +25,15 @@ export interface WorkspaceTerminalPane {
 }
 
 export interface WorkspaceDocument {
+  activeTabId: string;
+  name: string;
+  nextTabIndex: number;
+  nextTerminalIndex: number;
+  tabs: WorkspaceTab[];
+  version: 2;
+}
+
+export interface LegacyWorkspaceDocument {
   layout: WorkspaceSplitNode | null;
   name: string;
   nextTerminalIndex: number;
@@ -32,32 +41,116 @@ export interface WorkspaceDocument {
   version: 1;
 }
 
-export interface WorkspaceDocumentInput {
+export interface WorkspaceTab {
+  id: string;
   layout: WorkspaceSplitNode | null;
-  name: string;
-  nextTerminalIndex: number;
   panes: Record<string, WorkspaceTerminalPane>;
+  title: string;
+}
+
+export interface WorkspaceDocumentInput {
+  activeTabId: string;
+  name: string;
+  nextTabIndex: number;
+  nextTerminalIndex: number;
+  tabs: WorkspaceTab[];
 }
 
 const MAX_WORKSPACE_ID_LENGTH = 80;
+const MAX_WORKSPACE_TABS = 24;
+const MAX_WORKSPACE_TERMINALS = 128;
 const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 export function createWorkspaceDocument(input: WorkspaceDocumentInput): WorkspaceDocument {
+  const tabs = input.tabs.map((tab, index) => ({
+    ...tab,
+    title: tab.title.trim() || `Tab ${index + 1}`,
+  }));
+  const activeTabId = tabs.some((tab) => tab.id === input.activeTabId) ? input.activeTabId : (tabs[0]?.id ?? "tab-1");
+
   return {
-    layout: input.layout,
+    activeTabId,
     name: input.name.trim() || "Untitled Workspace",
-    nextTerminalIndex: Math.max(1, Math.floor(input.nextTerminalIndex)),
-    panes: input.panes,
-    version: 1,
+    nextTabIndex: Math.max(1, Math.floor(input.nextTabIndex), getHighestGeneratedIndex(tabs.map((tab) => tab.id), "tab-") + 1),
+    nextTerminalIndex: Math.max(1, Math.floor(input.nextTerminalIndex), getHighestGeneratedIndex(tabs.flatMap((tab) => Object.keys(tab.panes)), "term-") + 1),
+    tabs,
+    version: 2,
   };
 }
 
 export function parseWorkspaceDocument(payload: unknown): WorkspaceDocument | null {
-  if (!isObject(payload) || payload.version !== 1 || typeof payload.name !== "string" || typeof payload.nextTerminalIndex !== "number" || !Number.isInteger(payload.nextTerminalIndex) || !isObject(payload.panes)) {
+  if (!isObject(payload)) {
+    return null;
+  }
+
+  if (payload.version === 1) {
+    return parseLegacyWorkspaceDocument(payload);
+  }
+
+  if (payload.version !== 2 || typeof payload.name !== "string" || !isValidWorkspaceId(payload.activeTabId) || typeof payload.nextTabIndex !== "number" || !Number.isInteger(payload.nextTabIndex) || typeof payload.nextTerminalIndex !== "number" || !Number.isInteger(payload.nextTerminalIndex) || !Array.isArray(payload.tabs) || payload.tabs.length === 0 || payload.tabs.length > MAX_WORKSPACE_TABS) {
+    return null;
+  }
+
+  const tabIds = new Set<string>();
+  const terminalIds = new Set<string>();
+  const tabs = payload.tabs.map((tabPayload) => parseWorkspaceTab(tabPayload));
+  if (tabs.some((tab) => tab === null)) {
+    return null;
+  }
+
+  for (const tab of tabs) {
+    if (!tab || tabIds.has(tab.id)) {
+      return null;
+    }
+
+    tabIds.add(tab.id);
+    for (const terminalId of Object.keys(tab.panes)) {
+      if (terminalIds.has(terminalId)) {
+        return null;
+      }
+
+      terminalIds.add(terminalId);
+    }
+  }
+
+  if (!tabIds.has(payload.activeTabId) || terminalIds.size > MAX_WORKSPACE_TERMINALS) {
+    return null;
+  }
+
+  return createWorkspaceDocument({
+    activeTabId: payload.activeTabId,
+    name: payload.name,
+    nextTabIndex: payload.nextTabIndex,
+    nextTerminalIndex: payload.nextTerminalIndex,
+    tabs: tabs as WorkspaceTab[],
+  });
+}
+
+function parseLegacyWorkspaceDocument(payload: Record<string, unknown>): WorkspaceDocument | null {
+  if (typeof payload.name !== "string" || typeof payload.nextTerminalIndex !== "number" || !Number.isInteger(payload.nextTerminalIndex) || !isObject(payload.panes)) {
     return null;
   }
 
   const nextTerminalIndex = payload.nextTerminalIndex;
+  const tab = parseWorkspaceTab({ id: "tab-1", layout: payload.layout, panes: payload.panes, title: "Main" });
+  if (!tab) {
+    return null;
+  }
+
+  return createWorkspaceDocument({
+    activeTabId: "tab-1",
+    name: payload.name,
+    nextTabIndex: 2,
+    nextTerminalIndex,
+    tabs: [tab],
+  });
+}
+
+function parseWorkspaceTab(payload: unknown): WorkspaceTab | null {
+  if (!isObject(payload) || !isValidWorkspaceId(payload.id) || typeof payload.title !== "string" || !isObject(payload.panes)) {
+    return null;
+  }
+
   const panes = parsePanes(payload.panes);
   if (!panes) {
     return null;
@@ -78,12 +171,12 @@ export function parseWorkspaceDocument(payload: unknown): WorkspaceDocument | nu
     return null;
   }
 
-  return createWorkspaceDocument({
+  return {
+    id: payload.id,
     layout,
-    name: payload.name,
-    nextTerminalIndex,
     panes,
-  });
+    title: payload.title.trim() || payload.id,
+  };
 }
 
 function parsePanes(payload: Record<string, unknown>) {
@@ -156,4 +249,15 @@ function isSplitDirection(payload: unknown): payload is WorkspaceSplitDirection 
 
 function isValidWorkspaceId(payload: unknown): payload is string {
   return typeof payload === "string" && payload.length > 0 && payload.length <= MAX_WORKSPACE_ID_LENGTH && /^[a-zA-Z0-9_-]+$/.test(payload) && !RESERVED_OBJECT_KEYS.has(payload);
+}
+
+function getHighestGeneratedIndex(ids: string[], prefix: string) {
+  return ids.reduce((highest, id) => {
+    if (!id.startsWith(prefix)) {
+      return highest;
+    }
+
+    const index = Number(id.slice(prefix.length));
+    return Number.isInteger(index) && index > highest ? index : highest;
+  }, 0);
 }
