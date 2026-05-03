@@ -41,6 +41,10 @@ button {
   font: inherit;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .app-shell {
   background: var(--bg);
   display: grid;

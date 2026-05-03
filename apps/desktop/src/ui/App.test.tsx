@@ -309,6 +309,17 @@ describe("App", () => {
     expect(screen.getByText("Wire MCP tool contract tests")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Todos" }).getAttribute("aria-pressed")).toBe("true");
   });
+
+  test("hides terminal tabs when switching to a resource page", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Memory" }));
+
+    expect(screen.getByRole("button", { name: "Memory" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("region", { name: "Memory" })).toBeTruthy();
+    expect(container.querySelector(".terminal-page")?.hasAttribute("hidden")).toBe(true);
+  });
 });
 
 function countTerminals(node: typeof initialSplitLayout): number {
