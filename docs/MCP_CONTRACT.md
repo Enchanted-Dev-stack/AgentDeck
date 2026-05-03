@@ -4,6 +4,8 @@
 
 V1 uses stdio for local CLI agents. HTTP transport is deferred until remote or multi-client use cases are required.
 
+See `docs/MCP_INSTALL.md` for local `agentdeck-mcp` install commands and client config snippets.
+
 ## Tool Naming
 
 Tools use dot-separated names grouped by domain.

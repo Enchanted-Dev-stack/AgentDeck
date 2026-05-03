@@ -8,6 +8,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { AgentDeckStore, getWorkspaceInstructions } from "@agentdeck/core";
 import { z } from "zod";
 
+export * from "./mcpInstall.js";
+
 const supportedDocExtensions = new Set([
   ".adoc",
   ".md",
