@@ -131,10 +131,10 @@ const docs = [
 ];
 
 const todos = [
-  "Wire MCP tool contract tests",
-  "Create OpenCode launch profile",
-  "Design saved pane layout schema",
-  "Add Qdrant adapter boundary",
+  { text: "Wire MCP tool contract tests", tag: "MCP contract" },
+  { text: "Create OpenCode launch profile", tag: "Agent launch" },
+  { text: "Design saved pane layout schema", tag: "Workspace schema" },
+  { text: "Add Qdrant adapter boundary", tag: "Search boundary" },
 ];
 
 const memories = [
@@ -1249,13 +1249,18 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
   if (page === "docs") {
     return (
       <section className="resource-page" aria-label="Docs">
-        <ResourceHeader icon="note" label="Docs" description="Project documents that agents can read without crowding the terminal surface." />
+        <ResourceHeader eyebrow="Knowledge Base" icon="note" label="Docs" description="Project documents that agents can read without crowding the terminal surface." />
         <div className="resource-grid">
           {docs.map((doc) => (
             <article className="resource-card" key={doc.path}>
-              <span>{doc.path}</span>
-              <h2>{doc.title}</h2>
-              <p>{doc.summary}</p>
+              <div className="resource-card__topline">
+                <span>{doc.path}</span>
+                <span className="resource-card__icon"><AgentDeckIcon name="note" size={15} /></span>
+              </div>
+              <div>
+                <h2>{doc.title}</h2>
+                <p>{doc.summary}</p>
+              </div>
             </article>
           ))}
         </div>
@@ -1266,12 +1271,15 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
   if (page === "todos") {
     return (
       <section className="resource-page" aria-label="Todos">
-        <ResourceHeader icon="task" label="Todos" description="Shared project work that stays available to humans and local agents." />
+        <ResourceHeader eyebrow="Execution Queue" icon="task" label="Todos" description="Shared project work that stays available to humans and local agents." />
         <ol className="todo-list">
           {todos.map((todo, index) => (
-            <li key={todo}>
+            <li key={todo.text}>
               <span>{String(index + 1).padStart(2, "0")}</span>
-              {todo}
+              <div>
+                <strong>{todo.text}</strong>
+                <small>{todo.tag}</small>
+              </div>
             </li>
           ))}
         </ol>
@@ -1282,14 +1290,17 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
   if (page === "integrations") {
     return (
       <section className="resource-page" aria-label="MCP Integrations">
-        <ResourceHeader icon="server" label="MCP Integrations" description="Install AgentDeck's local stdio MCP into project-level agent configs so OpenCode and Claude Code can discover shared context tools." />
+        <ResourceHeader eyebrow="Agent Wiring" icon="server" label="MCP Integrations" description="Install AgentDeck's local stdio MCP into project-level agent configs so OpenCode and Claude Code can discover shared context tools." />
         <div className="integration-grid">
           {mcpClients.map((client) => (
             <article className="integration-card" key={client.id}>
               <div className="integration-card__header">
-                <span>{client.configFile}</span>
-                <h2>{client.label}</h2>
-                <p>{client.description}</p>
+                <span className="integration-card__icon"><AgentDeckIcon name="server" size={18} /></span>
+                <div>
+                  <span>{client.configFile}</span>
+                  <h2>{client.label}</h2>
+                  <p>{client.description}</p>
+                </div>
               </div>
               <div className="integration-card__actions">
                 <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "install")} type="button">
@@ -1317,12 +1328,15 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
 
   return (
     <section className="resource-page" aria-label="Memory">
-      <ResourceHeader icon="brain" label="Memory" description="Durable workspace facts and decisions retrieved through MCP." />
+      <ResourceHeader eyebrow="Shared Recall" icon="brain" label="Memory" description="Durable workspace facts and decisions retrieved through MCP." />
       <div className="memory-list">
         {memories.map((memory) => (
           <article className="memory-card" key={memory.text}>
-            <span>{memory.label}</span>
-            <p>{memory.text}</p>
+            <span className="memory-card__icon"><AgentDeckIcon name="brain" size={16} /></span>
+            <div>
+              <span>{memory.label}</span>
+              <p>{memory.text}</p>
+            </div>
           </article>
         ))}
       </div>
@@ -1330,14 +1344,18 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
   );
 }
 
-function ResourceHeader({ description, icon, label }: { description: string; icon: AgentDeckIconName; label: string }) {
+function ResourceHeader({ description, eyebrow, icon, label }: { description: string; eyebrow: string; icon: AgentDeckIconName; label: string }) {
   return (
     <header className="resource-header">
-      <span>
-        <AgentDeckIcon name={icon} size={16} />
-        {label}
-      </span>
-      <p>{description}</p>
+      <div className="resource-header__orb" aria-hidden="true" />
+      <div className="resource-header__icon">
+        <AgentDeckIcon name={icon} size={20} />
+      </div>
+      <div>
+        <p className="resource-header__eyebrow">{eyebrow}</p>
+        <span>{label}</span>
+        <p>{description}</p>
+      </div>
     </header>
   );
 }
