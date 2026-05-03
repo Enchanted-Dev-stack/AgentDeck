@@ -43,6 +43,11 @@ export const sharedStateChannels = {
   updateTodo: "shared:todos:update",
 } as const;
 
+export const settingsChannels = {
+  get: "settings:get",
+  update: "settings:update",
+} as const;
+
 export type McpClient = "opencode" | "claude-code";
 export type McpInstructionScope = "global" | "repo";
 
@@ -104,6 +109,15 @@ export interface WorkspaceDocContent extends WorkspaceDoc {
   text: string;
 }
 
+export interface AppSettings {
+  sharedContextEnabled: boolean;
+}
+
+export interface SettingsBridge {
+  get: () => Promise<AppSettings>;
+  update: (settings: Partial<AppSettings>) => Promise<AppSettings>;
+}
+
 export interface SharedStateBridge {
   bootstrapWorkspace: () => Promise<Workspace | null>;
   createNote: (input: CreateNoteInput) => Promise<Note>;
@@ -124,6 +138,7 @@ export interface SharedStateBridge {
 
 export interface AgentDeckBridge {
   mcp: McpBridge;
+  settings: SettingsBridge;
   shared: SharedStateBridge;
   terminal: TerminalBridge;
   workspace: WorkspaceBridge;
@@ -145,6 +160,10 @@ export function getWorkspaceBridge() {
 
 export function getMcpBridge() {
   return typeof window === "undefined" ? undefined : window.agentDeck?.mcp;
+}
+
+export function getSettingsBridge() {
+  return typeof window === "undefined" ? undefined : window.agentDeck?.settings;
 }
 
 export function getSharedStateBridge() {

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Memory, Note, Todo, Workspace } from "@agentdeck/core";
-import type { SharedStateBridge } from "../terminal/bridge.js";
+import type { AppSettings, SettingsBridge, SharedStateBridge } from "../terminal/bridge.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -412,19 +412,40 @@ describe("App", () => {
     expect(container.querySelector(".terminal-page")?.hasAttribute("hidden")).toBe(true);
   });
 
-  test("opens MCP integrations from the sidebar", async () => {
+  test("opens settings from the sidebar", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
 
-    expect(screen.getByRole("region", { name: "MCP Integrations" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Enable Shared Context" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "OpenCode" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Claude Code" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Install Global MCP" })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "Repair Global MCP" })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "Uninstall" })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "Copy Config" })).toHaveLength(2);
+  });
+
+  test("disables shared context without uninstalling MCP integrations", async () => {
+    const user = userEvent.setup();
+    const settings = { sharedContextEnabled: true };
+    const update = vi.fn((input: Partial<AppSettings>) => {
+      Object.assign(settings, input);
+      return Promise.resolve({ ...settings });
+    });
+    window.agentDeck = createFakeBridge({ settings: createFakeSettingsBridge({ get: () => Promise.resolve({ ...settings }), update }) });
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(await screen.findByRole("checkbox"));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ sharedContextEnabled: false }));
+    expect(screen.queryByRole("button", { name: "Docs" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Todos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Memory" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "OpenCode" })).toBeTruthy();
   });
 
   test("runs MCP integration actions through the bridge", async () => {
@@ -437,7 +458,7 @@ describe("App", () => {
     window.agentDeck = createFakeBridge({ mcp: { copyConfig, copyInstructions, getStatus: createMcpStatus, install, installInstructions, uninstall } });
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getAllByRole("button", { name: "Install Global MCP" })[0]!);
     await waitFor(() => expect(install).toHaveBeenCalledWith("opencode"));
     expect(screen.getByText(/Installed AgentDeck MCP config/)).toBeTruthy();
@@ -479,7 +500,7 @@ describe("App", () => {
     });
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await waitFor(() => expect(screen.getByText("Instructions recommended")).toBeTruthy());
     await user.click(screen.getByRole("button", { name: "Install Instructions" }));
     await waitFor(() => expect(installInstructions).toHaveBeenCalledWith("opencode", "global"));
@@ -503,7 +524,7 @@ describe("App", () => {
     });
     const { container } = render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getAllByRole("button", { name: "Install Global MCP" })[0]!);
     const dialog = await screen.findByRole("dialog", { name: "AgentDeck instruction recommendation" });
     expect(container.querySelector(".instruction-dialog-backdrop")).toBeTruthy();
@@ -539,7 +560,7 @@ describe("App", () => {
     });
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getAllByRole("button", { name: "Install Global MCP" })[0]!);
     const dialog = await screen.findByRole("dialog", { name: "AgentDeck instruction recommendation" });
     await user.click(within(dialog as HTMLElement).getByRole("button", { name: "Install Instructions" }));
@@ -569,7 +590,7 @@ describe("App", () => {
     });
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getAllByRole("button", { name: "Install Global MCP" })[0]!);
     await waitFor(() => expect(getStatus).toHaveBeenCalledTimes(2));
     installStatus.resolve({
@@ -614,7 +635,7 @@ describe("App", () => {
     });
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     const opencodeCard = screen.getByRole("heading", { name: "OpenCode" }).closest(".integration-card");
     if (!opencodeCard) {
       throw new Error("Expected OpenCode integration card");
@@ -768,8 +789,16 @@ function createFakeSharedBridge(overrides: Partial<SharedStateBridge> = {}): Sha
   };
 }
 
-function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> & { mcp?: NonNullable<Window["agentDeck"]>["mcp"]; shared?: NonNullable<Window["agentDeck"]>["shared"]; workspace?: NonNullable<Window["agentDeck"]>["workspace"] } = {}): NonNullable<Window["agentDeck"]> {
-  const { mcp, shared, workspace, ...terminalOverrides } = overrides;
+function createFakeSettingsBridge(overrides: Partial<SettingsBridge> = {}): SettingsBridge {
+  return {
+    get: () => Promise.resolve({ sharedContextEnabled: true }),
+    update: (settings) => Promise.resolve({ sharedContextEnabled: settings.sharedContextEnabled ?? true }),
+    ...overrides,
+  };
+}
+
+function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> & { mcp?: NonNullable<Window["agentDeck"]>["mcp"]; settings?: NonNullable<Window["agentDeck"]>["settings"]; shared?: NonNullable<Window["agentDeck"]>["shared"]; workspace?: NonNullable<Window["agentDeck"]>["workspace"] } = {}): NonNullable<Window["agentDeck"]> {
+  const { mcp, settings, shared, workspace, ...terminalOverrides } = overrides;
   return {
     mcp: mcp ?? {
       copyConfig: () => Promise.resolve({ changed: false, ok: true, message: "Copied config", status: "manual" }),
@@ -779,6 +808,7 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
       installInstructions: () => Promise.resolve({ changed: true, ok: true, message: "Installed instructions", status: "installed" }),
       uninstall: () => Promise.resolve({ changed: true, ok: true, message: "Uninstalled", status: "not_installed" }),
     },
+    settings: settings ?? createFakeSettingsBridge(),
     shared: shared ?? createFakeSharedBridge(),
     terminal: {
       closeSession: () => Promise.resolve(true),

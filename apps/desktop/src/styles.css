@@ -1168,6 +1168,106 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
+.settings-card {
+  align-items: center;
+  backdrop-filter: blur(26px);
+  background: rgba(255, 255, 255, 0.68);
+  border: 0;
+  border-radius: 28px;
+  box-shadow: 0 18px 42px rgba(55, 56, 78, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  color: rgba(17, 19, 21, 0.58);
+  display: flex;
+  gap: 22px;
+  justify-content: space-between;
+  max-width: 860px;
+  padding: 20px;
+}
+
+.settings-card > div:first-child {
+  min-width: 0;
+}
+
+.settings-card span {
+  color: rgba(17, 19, 21, 0.58);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-card h2 {
+  color: #111315;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 0.96;
+  margin: 8px 0 8px;
+}
+
+.settings-card p {
+  color: rgba(17, 19, 21, 0.62);
+  font-size: 15px;
+  line-height: 1.35;
+  margin: 0;
+  max-width: 56ch;
+}
+
+.settings-toggle {
+  align-items: center;
+  background: rgba(17, 19, 21, 0.08);
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-grid;
+  flex: 0 0 auto;
+  gap: 10px;
+  grid-template-columns: 48px auto;
+  min-height: 38px;
+  padding: 4px 14px 4px 4px;
+}
+
+.settings-toggle input {
+  appearance: none;
+  background: rgba(17, 19, 21, 0.2);
+  border-radius: 999px;
+  cursor: pointer;
+  height: 30px;
+  margin: 0;
+  position: relative;
+  transition: background-color 160ms ease;
+  width: 48px;
+}
+
+.settings-toggle input::before {
+  background: #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(17, 19, 21, 0.18);
+  content: "";
+  height: 24px;
+  left: 3px;
+  position: absolute;
+  top: 3px;
+  transition: transform 160ms ease;
+  width: 24px;
+}
+
+.settings-toggle input:checked {
+  background: rgba(17, 19, 21, 0.94);
+}
+
+.settings-toggle input:checked::before {
+  transform: translateX(18px);
+}
+
+.settings-toggle input:focus-visible {
+  outline: 3px solid rgba(17, 19, 21, 0.12);
+}
+
+.settings-toggle span {
+  color: rgba(17, 19, 21, 0.72);
+}
+
 .integration-notices {
   display: grid;
   gap: 10px;

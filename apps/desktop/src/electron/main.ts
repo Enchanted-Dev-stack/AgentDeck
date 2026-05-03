@@ -9,7 +9,7 @@ import { buildAgentDeckServerSpec, createManualConfigSnippet, createMcpInstructi
 import { AgentDeckStore } from "@agentdeck/core";
 import * as pty from "node-pty";
 import { resolveDefaultShell, TerminalSessionHost, type PtyAdapter, type ResolvedShell, type TerminalSpawnOptions } from "@agentdeck/terminal";
-import { mcpChannels, sharedStateChannels, terminalChannels, workspaceChannels, type McpActionResult, type McpClientSetupStatus, type McpSetupStatus, type TerminalCreateRequest, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
+import { mcpChannels, settingsChannels, sharedStateChannels, terminalChannels, workspaceChannels, type AppSettings, type McpActionResult, type McpClientSetupStatus, type McpSetupStatus, type TerminalCreateRequest, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import { parseWorkspaceDocument } from "../workspace/schema.js";
 
 const MAX_TERMINAL_ID_LENGTH = 80;
@@ -18,6 +18,7 @@ const MAX_WORKSPACE_FILE_BYTES = 1_000_000;
 const CLAUDE_MCP_COMMAND_TIMEOUT_MS = 15_000;
 const MAX_SHARED_DOC_BYTES = 1_000_000;
 const supportedSharedDocExtensions = new Set([".adoc", ".md", ".mdx", ".rst", ".txt"]);
+const defaultAppSettings: AppSettings = { sharedContextEnabled: true };
 const sessionOwners = new Map<string, number>();
 
 class NodePtyAdapter implements PtyAdapter {
@@ -185,7 +186,7 @@ function registerWorkspaceIpc() {
 
 function registerSharedStateIpc() {
   ipcMain.handle(sharedStateChannels.bootstrapWorkspace, async (event) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       return null;
     }
 
@@ -194,7 +195,7 @@ function registerSharedStateIpc() {
   });
 
   ipcMain.handle(sharedStateChannels.selectWorkspaceRoot, async (event) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       return null;
     }
 
@@ -214,66 +215,90 @@ function registerSharedStateIpc() {
     return (await store.findWorkspaceByRootPath(rootPath)) ?? store.createWorkspace({ name: basename(rootPath), rootPath });
   });
 
-  ipcMain.handle(sharedStateChannels.listTodos, async (event, workspaceId: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().listTodos(workspaceId) : []));
+  ipcMain.handle(sharedStateChannels.listTodos, async (event, workspaceId: string) => (isTrustedIpcEvent(event) && (await isSharedContextEnabled()) ? createSharedStateStore().listTodos(workspaceId) : []));
   ipcMain.handle(sharedStateChannels.createTodo, async (event, input) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to create todo from an untrusted renderer.");
     }
     return createSharedStateStore().createTodo(input);
   });
   ipcMain.handle(sharedStateChannels.updateTodo, async (event, todoId: string, input) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to update todo from an untrusted renderer.");
     }
     return createSharedStateStore().updateTodo(todoId, input);
   });
   ipcMain.handle(sharedStateChannels.deleteTodo, async (event, todoId: string) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to delete todo from an untrusted renderer.");
     }
     return createSharedStateStore().deleteTodo(todoId);
   });
 
-  ipcMain.handle(sharedStateChannels.listNotes, async (event, workspaceId: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().listNotes(workspaceId) : []));
+  ipcMain.handle(sharedStateChannels.listNotes, async (event, workspaceId: string) => (isTrustedIpcEvent(event) && (await isSharedContextEnabled()) ? createSharedStateStore().listNotes(workspaceId) : []));
   ipcMain.handle(sharedStateChannels.createNote, async (event, input) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to create note from an untrusted renderer.");
     }
     return createSharedStateStore().createNote(input);
   });
   ipcMain.handle(sharedStateChannels.updateNote, async (event, noteId: string, input) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to update note from an untrusted renderer.");
     }
     return createSharedStateStore().updateNote(noteId, input);
   });
   ipcMain.handle(sharedStateChannels.deleteNote, async (event, noteId: string) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to delete note from an untrusted renderer.");
     }
     return createSharedStateStore().deleteNote(noteId);
   });
 
-  ipcMain.handle(sharedStateChannels.listMemories, async (event, workspaceId: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().listMemories(workspaceId) : []));
-  ipcMain.handle(sharedStateChannels.searchMemory, async (event, workspaceId: string, query: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().searchMemory(workspaceId, query) : []));
+  ipcMain.handle(sharedStateChannels.listMemories, async (event, workspaceId: string) => (isTrustedIpcEvent(event) && (await isSharedContextEnabled()) ? createSharedStateStore().listMemories(workspaceId) : []));
+  ipcMain.handle(sharedStateChannels.searchMemory, async (event, workspaceId: string, query: string) => (isTrustedIpcEvent(event) && (await isSharedContextEnabled()) ? createSharedStateStore().searchMemory(workspaceId, query) : []));
   ipcMain.handle(sharedStateChannels.storeMemory, async (event, input) => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to store memory from an untrusted renderer.");
     }
     return createSharedStateStore().storeMemory(input);
   });
 
   ipcMain.handle(sharedStateChannels.listDocs, async (event, workspaceId: string): Promise<WorkspaceDoc[]> => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       return [];
     }
     return listWorkspaceDocs(createSharedStateStore(), workspaceId);
   });
   ipcMain.handle(sharedStateChannels.readDoc, async (event, workspaceId: string, path: string): Promise<WorkspaceDocContent> => {
-    if (!isTrustedIpcEvent(event)) {
+    if (!isTrustedIpcEvent(event) || !(await isSharedContextEnabled())) {
       throw new Error("Unable to read doc from an untrusted renderer.");
     }
     return readWorkspaceDoc(createSharedStateStore(), workspaceId, path);
+  });
+}
+
+function registerSettingsIpc() {
+  ipcMain.handle(settingsChannels.get, async (event): Promise<AppSettings> => {
+    if (!isTrustedIpcEvent(event)) {
+      return defaultAppSettings;
+    }
+
+    return readAppSettings();
+  });
+
+  ipcMain.handle(settingsChannels.update, async (event, payload: unknown): Promise<AppSettings> => {
+    if (!isTrustedIpcEvent(event)) {
+      return defaultAppSettings;
+    }
+
+    const currentSettings = await readAppSettings();
+    const nextSettings: AppSettings = {
+      ...currentSettings,
+      ...(isPlainObject(payload) && typeof payload.sharedContextEnabled === "boolean" ? { sharedContextEnabled: payload.sharedContextEnabled } : {}),
+    };
+    await writeFile(getAgentDeckSettingsFilePath(), `${JSON.stringify(nextSettings, null, 2)}\n`, "utf8");
+    return nextSettings;
   });
 }
 
@@ -647,6 +672,30 @@ function resolveNodeCommand() {
 
 function getAgentDeckStateFilePath() {
   return join(app.getPath("userData"), "agentdeck-state.json");
+}
+
+function getAgentDeckSettingsFilePath() {
+  return join(app.getPath("userData"), "agentdeck-settings.json");
+}
+
+async function readAppSettings(): Promise<AppSettings> {
+  try {
+    const rawSettings = JSON.parse(await readFile(getAgentDeckSettingsFilePath(), "utf8"));
+    return {
+      sharedContextEnabled: isPlainObject(rawSettings) && typeof rawSettings.sharedContextEnabled === "boolean" ? rawSettings.sharedContextEnabled : defaultAppSettings.sharedContextEnabled,
+    };
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return defaultAppSettings;
+    }
+
+    console.warn("Failed to read AgentDeck settings; using defaults.", error);
+    return defaultAppSettings;
+  }
+}
+
+async function isSharedContextEnabled() {
+  return (await readAppSettings()).sharedContextEnabled;
 }
 
 function createSharedStateStore() {
@@ -1114,6 +1163,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerMcpIpc();
+  registerSettingsIpc();
   registerSharedStateIpc();
   registerTerminalIpc();
   registerWorkspaceIpc();
@@ -1122,7 +1172,7 @@ app.whenReady().then(() => {
   if (process.env.AGENTDECK_SMOKE_TEST === "1") {
     const fallbackTimer = setTimeout(() => process.exit(1), 5_000);
     window.webContents.once("did-finish-load", async () => {
-      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.mcp && window.agentDeck?.shared && window.agentDeck?.terminal && window.agentDeck?.workspace)");
+      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.mcp && window.agentDeck?.settings && window.agentDeck?.shared && window.agentDeck?.terminal && window.agentDeck?.workspace)");
       console.log(`AgentDeck preload bridge: ${hasBridge ? "available" : "missing"}`);
       setTimeout(() => {
         clearTimeout(fallbackTimer);

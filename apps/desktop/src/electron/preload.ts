@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { mcpChannels, sharedStateChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type McpActionResult, type McpClient, type McpInstructionScope, type McpSetupStatus, type TerminalCreateRequest, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
+import { mcpChannels, settingsChannels, sharedStateChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type AppSettings, type McpActionResult, type McpClient, type McpInstructionScope, type McpSetupStatus, type TerminalCreateRequest, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import type { CreateMemoryInput, CreateNoteInput, CreateTodoInput, Memory, Note, Todo, UpdateNoteInput, UpdateTodoInput, Workspace } from "@agentdeck/core";
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
 import type { WorkspaceDocument } from "../workspace/schema.js";
@@ -12,6 +12,10 @@ const bridge: AgentDeckBridge = {
     install: (client: McpClient) => ipcRenderer.invoke(mcpChannels.install, client) as Promise<McpActionResult>,
     installInstructions: (client: McpClient, scope: McpInstructionScope) => ipcRenderer.invoke(mcpChannels.installInstructions, client, scope) as Promise<McpActionResult>,
     uninstall: (client: McpClient) => ipcRenderer.invoke(mcpChannels.uninstall, client) as Promise<McpActionResult>,
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(settingsChannels.get) as Promise<AppSettings>,
+    update: (settings: Partial<AppSettings>) => ipcRenderer.invoke(settingsChannels.update, settings) as Promise<AppSettings>,
   },
   shared: {
     bootstrapWorkspace: () => ipcRenderer.invoke(sharedStateChannels.bootstrapWorkspace) as Promise<Workspace | null>,

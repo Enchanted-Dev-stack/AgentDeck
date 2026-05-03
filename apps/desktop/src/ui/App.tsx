@@ -1,6 +1,6 @@
 import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { Memory, MemoryType, Note, Priority, Todo, TodoStatus, Workspace } from "@agentdeck/core";
-import { getMcpBridge, getSharedStateBridge, getTerminalBridge, getWorkspaceBridge, type McpActionResult, type McpClient, type McpSetupStatus, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
+import { getMcpBridge, getSettingsBridge, getSharedStateBridge, getTerminalBridge, getWorkspaceBridge, type AppSettings, type McpActionResult, type McpClient, type McpSetupStatus, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import { createWorkspaceDocument } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 import { TerminalEmulator } from "./TerminalEmulator.js";
@@ -62,6 +62,7 @@ interface RenameDialogState {
 const MIN_PANE_WIDTH = 220;
 const MIN_PANE_HEIGHT = 140;
 const MAX_PANE_TITLE_LENGTH = 80;
+const defaultAppSettings: AppSettings = { sharedContextEnabled: true };
 
 const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
   { id: "terminal", label: "Terminal", icon: "terminal" },
@@ -145,10 +146,14 @@ export function App() {
   const [workspaceName, setWorkspaceName] = useState("AgentDeck Workspace");
   const [dismissedInstructionPrompts, setDismissedInstructionPrompts] = useState<Set<McpClient>>(new Set());
   const [instructionPromptClient, setInstructionPromptClient] = useState<McpClient | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>(defaultAppSettings);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const mcpStatusRequestId = useRef(0);
+  const settingsUpdateRequestId = useRef(0);
   const [terminalState, setTerminalState] = useState({
     activeTabId: "tab-1",
     nextTabIndex: 2,
@@ -159,8 +164,10 @@ export function App() {
 
   useEffect(() => {
     void refreshMcpStatus();
-    void bootstrapSharedWorkspace();
+    void loadAppSettings();
   }, []);
+
+  const visibleNavItems = appSettings.sharedContextEnabled ? navItems : navItems.filter((item) => item.id === "terminal");
 
   useEffect(() => {
     if (!mcpSetupStatus) {
@@ -389,6 +396,57 @@ export function App() {
     setActivePage("terminal");
   }
 
+  async function loadAppSettings() {
+    setSettingsLoading(true);
+    try {
+      const settings = (await getSettingsBridge()?.get()) ?? defaultAppSettings;
+      setAppSettings(settings);
+      if (settings.sharedContextEnabled) {
+        await bootstrapSharedWorkspace();
+      } else {
+        setActiveWorkspace(null);
+        setWorkspaceLoading(false);
+      }
+    } catch (error) {
+      setAppSettings(defaultAppSettings);
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to load settings.");
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  async function updateAppSettings(nextSettings: Partial<AppSettings>) {
+    const requestId = ++settingsUpdateRequestId.current;
+    setSettingsSaving(true);
+    try {
+      const settings = (await getSettingsBridge()?.update(nextSettings)) ?? { ...appSettings, ...nextSettings };
+      if (requestId !== settingsUpdateRequestId.current) {
+        return;
+      }
+
+      setAppSettings(settings);
+      if (settings.sharedContextEnabled) {
+        await bootstrapSharedWorkspace();
+        return;
+      }
+
+      setActiveWorkspace(null);
+      setWorkspaceError(null);
+      setWorkspaceLoading(false);
+      if (activePage !== "terminal" && activePage !== "integrations") {
+        setActivePage("integrations");
+      }
+    } catch (error) {
+      if (requestId === settingsUpdateRequestId.current) {
+        setWorkspaceError(error instanceof Error ? error.message : "Unable to update settings.");
+      }
+    } finally {
+      if (requestId === settingsUpdateRequestId.current) {
+        setSettingsSaving(false);
+      }
+    }
+  }
+
   async function bootstrapSharedWorkspace() {
     const bridge = getSharedStateBridge();
     if (!bridge) {
@@ -527,7 +585,7 @@ export function App() {
           <AgentDeckIcon name="sparkles" size={20} />
         </div>
         <nav className="sidebar__nav" aria-label="Workspace pages">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               aria-label={item.label}
               aria-pressed={activePage === item.id}
@@ -548,7 +606,7 @@ export function App() {
           <button aria-label="Import workspace" className="sidebar__button" onClick={importWorkspace} title="Import workspace" type="button">
             <AgentDeckIcon name="folder" size={18} />
           </button>
-          <button aria-label="MCP Integrations" aria-pressed={activePage === "integrations"} className="sidebar__button" onClick={() => setActivePage("integrations")} title="MCP Integrations" type="button">
+          <button aria-label="Settings" aria-pressed={activePage === "integrations"} className="sidebar__button" onClick={() => setActivePage("integrations")} title="Settings" type="button">
             <AgentDeckIcon name="settings" size={18} />
           </button>
         </div>
@@ -583,7 +641,7 @@ export function App() {
             })}
           </div>
         </section>
-        {activePage !== "terminal" ? <ResourcePage activeWorkspace={activeWorkspace} dismissedInstructionPrompts={dismissedInstructionPrompts} mcpMessages={mcpMessages} mcpSetupStatus={mcpSetupStatus} onDismissInstructionPrompt={dismissInstructionPrompt} onMcpAction={runMcpAction} onSelectWorkspaceRoot={selectSharedWorkspaceRoot} page={activePage} pendingMcpClients={pendingMcpClients} workspaceError={workspaceError} workspaceLoading={workspaceLoading} /> : null}
+        {activePage !== "terminal" ? <ResourcePage activeWorkspace={activeWorkspace} appSettings={appSettings} dismissedInstructionPrompts={dismissedInstructionPrompts} mcpMessages={mcpMessages} mcpSetupStatus={mcpSetupStatus} onDismissInstructionPrompt={dismissInstructionPrompt} onMcpAction={runMcpAction} onSelectWorkspaceRoot={selectSharedWorkspaceRoot} onUpdateSettings={updateAppSettings} page={activePage} pendingMcpClients={pendingMcpClients} settingsLoading={settingsLoading || settingsSaving} workspaceError={workspaceError} workspaceLoading={workspaceLoading} /> : null}
       </section>
       {instructionPromptClient ? <InstructionPrompt client={instructionPromptClient} onDismiss={() => dismissInstructionPrompt(instructionPromptClient)} onInstall={() => runMcpAction(instructionPromptClient, "install-global-instructions")} /> : null}
       {renameDialog ? <RenameDialog dialog={renameDialog} onCancel={() => setRenameDialog(null)} onChange={updateRenameValue} onSubmit={submitRename} /> : null}
@@ -1345,7 +1403,16 @@ function getSubtreeMinPixels(node: SplitNode | undefined, dimension: "width" | "
   return Math.max(...node.children.map((child) => getSubtreeMinPixels(child, dimension)));
 }
 
-function ResourcePage({ activeWorkspace, dismissedInstructionPrompts, mcpMessages, mcpSetupStatus, onDismissInstructionPrompt, onMcpAction, onSelectWorkspaceRoot, page, pendingMcpClients, workspaceError, workspaceLoading }: { activeWorkspace: Workspace | null; dismissedInstructionPrompts: Set<McpClient>; mcpMessages: Record<McpClient, string>; mcpSetupStatus: McpSetupStatus | null; onDismissInstructionPrompt: (client: McpClient) => void; onMcpAction: (client: McpClient, action: McpUiAction) => void; onSelectWorkspaceRoot: () => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean>; workspaceError: string | null; workspaceLoading: boolean }) {
+function ResourcePage({ activeWorkspace, appSettings, dismissedInstructionPrompts, mcpMessages, mcpSetupStatus, onDismissInstructionPrompt, onMcpAction, onSelectWorkspaceRoot, onUpdateSettings, page, pendingMcpClients, settingsLoading, workspaceError, workspaceLoading }: { activeWorkspace: Workspace | null; appSettings: AppSettings; dismissedInstructionPrompts: Set<McpClient>; mcpMessages: Record<McpClient, string>; mcpSetupStatus: McpSetupStatus | null; onDismissInstructionPrompt: (client: McpClient) => void; onMcpAction: (client: McpClient, action: McpUiAction) => void; onSelectWorkspaceRoot: () => void; onUpdateSettings: (settings: Partial<AppSettings>) => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean>; settingsLoading: boolean; workspaceError: string | null; workspaceLoading: boolean }) {
+  if (!appSettings.sharedContextEnabled && page !== "integrations") {
+    return (
+      <section className="resource-page" aria-label="Shared Context Disabled">
+        <ResourceHeader eyebrow="Terminal Only" icon="settings" label="Shared Context Off" description="AgentDeck is only managing terminal panes and agent sessions right now." />
+        <SharedContextDisabledCard onEnable={() => onUpdateSettings({ sharedContextEnabled: true })} />
+      </section>
+    );
+  }
+
   if (page === "docs") {
     return (
       <section className="resource-page" aria-label="Docs">
@@ -1370,7 +1437,9 @@ function ResourcePage({ activeWorkspace, dismissedInstructionPrompts, mcpMessage
 
   if (page === "integrations") {
     return (
-      <section className="resource-page" aria-label="MCP Integrations">
+      <section className="resource-page" aria-label="Settings">
+        <ResourceHeader eyebrow="Preferences" icon="settings" label="Settings" description="Choose whether AgentDeck acts as a shared-context MCP workspace or a terminal-only multi-agent launcher." />
+        <SharedContextSettingsCard appSettings={appSettings} disabled={settingsLoading} onUpdateSettings={onUpdateSettings} />
         <ResourceHeader eyebrow="Agent Wiring" icon="server" label="MCP Integrations" description="Install AgentDeck's local stdio MCP globally, then add instructions so agents know when to use shared context tools." />
         <InstructionNoticeList dismissedInstructionPrompts={dismissedInstructionPrompts} mcpSetupStatus={mcpSetupStatus} onDismiss={onDismissInstructionPrompt} onInstall={(client) => onMcpAction(client, "install-global-instructions")} pendingMcpClients={pendingMcpClients} />
         <div className="integration-grid">
@@ -1424,6 +1493,36 @@ function ResourcePage({ activeWorkspace, dismissedInstructionPrompts, mcpMessage
         {(workspace) => <NotesMemoryPanel workspace={workspace} />}
       </WorkspaceGate>
     </section>
+  );
+}
+
+function SharedContextSettingsCard({ appSettings, disabled, onUpdateSettings }: { appSettings: AppSettings; disabled: boolean; onUpdateSettings: (settings: Partial<AppSettings>) => void }) {
+  return (
+    <article className="settings-card">
+      <div>
+        <span>Shared Context</span>
+        <h2>Enable Shared Context</h2>
+        <p>Let agents share project docs, todos, notes, and memory through AgentDeck MCP. Turn this off to use AgentDeck only as a multi-agent terminal workspace.</p>
+      </div>
+      <label className="settings-toggle">
+        <input checked={appSettings.sharedContextEnabled} disabled={disabled} onChange={(event) => onUpdateSettings({ sharedContextEnabled: event.target.checked })} type="checkbox" />
+        <span>{appSettings.sharedContextEnabled ? "On" : "Off"}</span>
+      </label>
+    </article>
+  );
+}
+
+function SharedContextDisabledCard({ onEnable }: { onEnable: () => void }) {
+  return (
+    <article className="resource-card resource-empty-card">
+      <div>
+        <h2>Terminal-only mode</h2>
+        <p>Docs, todos, notes, and memory are paused. MCP configs remain installed, but this desktop workspace will not create or select shared context until you enable it again.</p>
+      </div>
+      <div className="integration-card__actions">
+        <button onClick={onEnable} type="button">Enable Shared Context</button>
+      </div>
+    </article>
   );
 }
 
