@@ -452,6 +452,16 @@ export class AgentDeckStore {
     );
   }
 
+  async listMemories(workspaceId: string): Promise<Memory[]> {
+    const state = await this.readState();
+    requireEntity(
+      state.workspaces.find((workspace) => workspace.id === workspaceId),
+      "workspace",
+      workspaceId,
+    );
+    return state.memories.filter((memory) => memory.workspaceId === workspaceId);
+  }
+
   async searchMemory(workspaceId: string, query: string): Promise<Memory[]> {
     const state = await this.readState();
     requireEntity(

@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Memory, Note, Todo, Workspace } from "@agentdeck/core";
+import type { SharedStateBridge } from "../terminal/bridge.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -298,6 +300,7 @@ describe("App", () => {
 
   test("moves shared context to separate pages", async () => {
     const user = userEvent.setup();
+    window.agentDeck = createFakeBridge();
     render(<App />);
 
     expect(screen.getAllByLabelText("Workspace panes")).not.toHaveLength(0);
@@ -306,8 +309,96 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Todos" }));
 
     expect(screen.getByText("Shared project work that stays available to humans and local agents.")).toBeTruthy();
-    expect(screen.getByText("Wire MCP tool contract tests")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("No shared todos yet.")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Todos" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("creates updates and deletes todos through shared state", async () => {
+    const user = userEvent.setup();
+    const todos = [createTodo({ title: "Wire real shared state" })];
+    const listTodos = vi.fn(() => Promise.resolve([...todos]));
+    const createTodoMock = vi.fn((input) => {
+      const todo = createTodo({ title: input.title, description: input.description, priority: input.priority });
+      todos.push(todo);
+      return Promise.resolve(todo);
+    });
+    const updateTodo = vi.fn((todoId, input) => {
+      const index = todos.findIndex((todo) => todo.id === todoId);
+      todos[index] = { ...todos[index]!, ...input, updatedAt: new Date().toISOString() };
+      return Promise.resolve(todos[index]!);
+    });
+    const deleteTodo = vi.fn((todoId) => {
+      const index = todos.findIndex((todo) => todo.id === todoId);
+      const [deleted] = todos.splice(index, 1);
+      return Promise.resolve(deleted!);
+    });
+    window.agentDeck = createFakeBridge({ shared: createFakeSharedBridge({ createTodo: createTodoMock, deleteTodo, listTodos, updateTodo }) });
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Todos" }));
+    await screen.findByText("Wire real shared state");
+
+    await user.click(screen.getByRole("button", { name: "Add Todo" }));
+    const todoDialog = screen.getByRole("dialog", { name: "Add Todo" });
+    await user.type(within(todoDialog as HTMLElement).getByLabelText("Todo title"), "Add UI CRUD");
+    await user.click(within(todoDialog as HTMLElement).getByRole("button", { name: "Add Todo" }));
+    await waitFor(() => expect(createTodoMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Add UI CRUD", workspaceId: testWorkspace.id })));
+    await screen.findByText("Add UI CRUD");
+
+    await user.click(screen.getAllByRole("button", { name: "Start" })[0]!);
+    await waitFor(() => expect(updateTodo).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: "in_progress" })));
+
+    await user.click(screen.getAllByRole("button", { name: "Delete" })[0]!);
+    await waitFor(() => expect(deleteTodo).toHaveBeenCalledWith(expect.any(String)));
+  });
+
+  test("shows notes and memory tabs backed by shared state", async () => {
+    const user = userEvent.setup();
+    const notes = [createNote({ title: "Decision log", body: "Use local-first shared state." })];
+    const memories = [createMemory({ content: "Use stdio MCP first.", type: "decision" })];
+    const createNoteMock = vi.fn((input) => {
+      const note = createNote({ title: input.title, body: input.body });
+      notes.push(note);
+      return Promise.resolve(note);
+    });
+    const storeMemory = vi.fn((input) => {
+      const memory = createMemory({ content: input.content, type: input.type });
+      memories.push(memory);
+      return Promise.resolve(memory);
+    });
+    window.agentDeck = createFakeBridge({ shared: createFakeSharedBridge({ createNote: createNoteMock, listMemories: () => Promise.resolve([...memories]), listNotes: () => Promise.resolve([...notes]), searchMemory: (_workspaceId, query) => Promise.resolve(memories.filter((memory) => memory.content.includes(query))), storeMemory }) });
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Memory" }));
+    await screen.findByText("Decision log");
+    await user.click(screen.getByRole("button", { name: "Add Note" }));
+    const noteDialog = screen.getByRole("dialog", { name: "Add Note" });
+    await user.type(within(noteDialog as HTMLElement).getByLabelText("Note title"), "Handoff note");
+    await user.type(within(noteDialog as HTMLElement).getByLabelText("Note body"), "Continue with Docs next.");
+    await user.click(within(noteDialog as HTMLElement).getByRole("button", { name: "Add Note" }));
+    await waitFor(() => expect(createNoteMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Handoff note", workspaceId: testWorkspace.id })));
+
+    await user.click(screen.getByRole("tab", { name: "Memory entries" }));
+    await screen.findByText("Use stdio MCP first.");
+    await user.click(screen.getByRole("button", { name: "Store Memory" }));
+    const memoryDialog = screen.getByRole("dialog", { name: "Store Memory" });
+    await user.type(within(memoryDialog as HTMLElement).getByLabelText("Memory content"), "Docs read from workspace docs folder.");
+    await user.click(within(memoryDialog as HTMLElement).getByRole("button", { name: "Store Memory" }));
+    await waitFor(() => expect(storeMemory).toHaveBeenCalledWith(expect.objectContaining({ content: "Docs read from workspace docs folder.", workspaceId: testWorkspace.id })));
+  });
+
+  test("lists and reads workspace docs through shared state", async () => {
+    const user = userEvent.setup();
+    const readDoc = vi.fn(() => Promise.resolve({ path: "MCP_CONTRACT.md", size: 42, text: "# MCP Contract\nTools are shared.", updatedAt: "2026-05-03T00:00:00.000Z" }));
+    window.agentDeck = createFakeBridge({ shared: createFakeSharedBridge({ listDocs: () => Promise.resolve([{ path: "MCP_CONTRACT.md", size: 42, updatedAt: "2026-05-03T00:00:00.000Z" }]), readDoc }) });
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Docs" }));
+    await user.click(await screen.findByRole("button", { name: /MCP_CONTRACT\.md/ }));
+
+    await waitFor(() => expect(readDoc).toHaveBeenCalledWith(testWorkspace.id, "MCP_CONTRACT.md"));
+    expect(screen.getByRole("complementary", { name: "Doc preview" })).toBeTruthy();
+    expect(await screen.findByText(/# MCP Contract/)).toBeTruthy();
   });
 
   test("hides terminal tabs when switching to a resource page", async () => {
@@ -598,8 +689,87 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
-function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> & { mcp?: NonNullable<Window["agentDeck"]>["mcp"]; workspace?: NonNullable<Window["agentDeck"]>["workspace"] } = {}): NonNullable<Window["agentDeck"]> {
-  const { mcp, workspace, ...terminalOverrides } = overrides;
+const testWorkspace: Workspace = {
+  createdAt: "2026-05-03T00:00:00.000Z",
+  description: "Test workspace",
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "Test Workspace",
+  rootPath: "D:\\projects\\test-workspace",
+  updatedAt: "2026-05-03T00:00:00.000Z",
+};
+
+type EntityOverrides<T> = { [K in keyof T]?: T[K] | undefined };
+
+function withoutUndefined<T extends object>(overrides: EntityOverrides<T>): Partial<T> {
+  return Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)) as Partial<T>;
+}
+
+function createTodo(overrides: EntityOverrides<Todo> = {}): Todo {
+  return {
+    createdAt: "2026-05-03T00:00:00.000Z",
+    description: "",
+    id: crypto.randomUUID(),
+    priority: "medium" as const,
+    status: "todo" as const,
+    tags: [],
+    title: "Test todo",
+    updatedAt: "2026-05-03T00:00:00.000Z",
+    workspaceId: testWorkspace.id,
+    ...withoutUndefined(overrides),
+  };
+}
+
+function createNote(overrides: EntityOverrides<Note> = {}): Note {
+  return {
+    body: "",
+    createdAt: "2026-05-03T00:00:00.000Z",
+    id: crypto.randomUUID(),
+    source: "human" as const,
+    tags: [],
+    title: "Test note",
+    updatedAt: "2026-05-03T00:00:00.000Z",
+    workspaceId: testWorkspace.id,
+    ...withoutUndefined(overrides),
+  };
+}
+
+function createMemory(overrides: EntityOverrides<Memory> = {}): Memory {
+  return {
+    content: "Test memory",
+    createdAt: "2026-05-03T00:00:00.000Z",
+    id: crypto.randomUUID(),
+    source: "human",
+    tags: [],
+    type: "fact" as const,
+    updatedAt: "2026-05-03T00:00:00.000Z",
+    workspaceId: testWorkspace.id,
+    ...withoutUndefined(overrides),
+  };
+}
+
+function createFakeSharedBridge(overrides: Partial<SharedStateBridge> = {}): SharedStateBridge {
+  return {
+    bootstrapWorkspace: () => Promise.resolve(testWorkspace),
+    createNote: (input) => Promise.resolve(createNote(input)),
+    createTodo: (input) => Promise.resolve(createTodo(input)),
+    deleteNote: (noteId) => Promise.resolve(createNote({ id: noteId })),
+    deleteTodo: (todoId) => Promise.resolve(createTodo({ id: todoId })),
+    listDocs: () => Promise.resolve([]),
+    listMemories: () => Promise.resolve([]),
+    listNotes: () => Promise.resolve([]),
+    listTodos: () => Promise.resolve([]),
+    readDoc: (_workspaceId, path) => Promise.resolve({ path, size: 0, text: "", updatedAt: "2026-05-03T00:00:00.000Z" }),
+    searchMemory: () => Promise.resolve([]),
+    selectWorkspaceRoot: () => Promise.resolve(testWorkspace),
+    storeMemory: (input) => Promise.resolve(createMemory(input)),
+    updateNote: (noteId, input) => Promise.resolve(createNote({ id: noteId, ...input })),
+    updateTodo: (todoId, input) => Promise.resolve(createTodo({ id: todoId, ...input })),
+    ...overrides,
+  };
+}
+
+function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> & { mcp?: NonNullable<Window["agentDeck"]>["mcp"]; shared?: NonNullable<Window["agentDeck"]>["shared"]; workspace?: NonNullable<Window["agentDeck"]>["workspace"] } = {}): NonNullable<Window["agentDeck"]> {
+  const { mcp, shared, workspace, ...terminalOverrides } = overrides;
   return {
     mcp: mcp ?? {
       copyConfig: () => Promise.resolve({ changed: false, ok: true, message: "Copied config", status: "manual" }),
@@ -609,6 +779,7 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
       installInstructions: () => Promise.resolve({ changed: true, ok: true, message: "Installed instructions", status: "installed" }),
       uninstall: () => Promise.resolve({ changed: true, ok: true, message: "Uninstalled", status: "not_installed" }),
     },
+    shared: shared ?? createFakeSharedBridge(),
     terminal: {
       closeSession: () => Promise.resolve(true),
       createSession: () => Promise.resolve(true),

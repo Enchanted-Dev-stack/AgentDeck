@@ -1,11 +1,13 @@
-import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
-import { getMcpBridge, getTerminalBridge, getWorkspaceBridge, type McpActionResult, type McpClient, type McpSetupStatus } from "../terminal/bridge.js";
+import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import type { Memory, MemoryType, Note, Priority, Todo, TodoStatus, Workspace } from "@agentdeck/core";
+import { getMcpBridge, getSharedStateBridge, getTerminalBridge, getWorkspaceBridge, type McpActionResult, type McpClient, type McpSetupStatus, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import { createWorkspaceDocument } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 import { TerminalEmulator } from "./TerminalEmulator.js";
 
 type Page = "terminal" | "docs" | "todos" | "memory" | "integrations";
 type McpUiAction = "copy" | "copy-global-instructions" | "install" | "install-global-instructions" | "install-repo-instructions" | "uninstall";
+type MemoryPageTab = "notes" | "memory";
 type SplitDirection = "row" | "column";
 type TerminalSide = "left" | "right" | "top" | "bottom";
 type SplitNode = TerminalNode | SplitGroup;
@@ -125,25 +127,6 @@ const initialTerminalTabs: TerminalTab[] = [
   },
 ];
 
-const docs = [
-  { title: "Product requirements", path: "docs/PRD.md", summary: "Local-first workspace scope, agent surfaces, and V1 boundaries." },
-  { title: "MCP contract", path: "docs/MCP_CONTRACT.md", summary: "Shared tools and resources exposed to coding agents over stdio." },
-  { title: "Architecture", path: "docs/ARCHITECTURE.md", summary: "Desktop shell, shared state package, and MCP server responsibilities." },
-];
-
-const todos = [
-  { text: "Wire MCP tool contract tests", tag: "MCP contract" },
-  { text: "Create OpenCode launch profile", tag: "Agent launch" },
-  { text: "Design saved pane layout schema", tag: "Workspace schema" },
-  { text: "Add Qdrant adapter boundary", tag: "Search boundary" },
-];
-
-const memories = [
-  { label: "Convention", text: "Shared memory is durable context, not raw logs." },
-  { label: "Decision", text: "Use stdio MCP first; HTTP transport is deferred." },
-  { label: "Risk", text: "Terminal execution needs explicit permission boundaries." },
-];
-
 export function App() {
   const [activePage, setActivePage] = useState<Page>("terminal");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -162,6 +145,9 @@ export function App() {
   const [workspaceName, setWorkspaceName] = useState("AgentDeck Workspace");
   const [dismissedInstructionPrompts, setDismissedInstructionPrompts] = useState<Set<McpClient>>(new Set());
   const [instructionPromptClient, setInstructionPromptClient] = useState<McpClient | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const mcpStatusRequestId = useRef(0);
   const [terminalState, setTerminalState] = useState({
     activeTabId: "tab-1",
@@ -173,6 +159,7 @@ export function App() {
 
   useEffect(() => {
     void refreshMcpStatus();
+    void bootstrapSharedWorkspace();
   }, []);
 
   useEffect(() => {
@@ -402,6 +389,46 @@ export function App() {
     setActivePage("terminal");
   }
 
+  async function bootstrapSharedWorkspace() {
+    const bridge = getSharedStateBridge();
+    if (!bridge) {
+      setWorkspaceLoading(false);
+      setWorkspaceError("Shared state is available only in the Electron desktop app.");
+      return;
+    }
+
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
+    try {
+      setActiveWorkspace(await bridge.bootstrapWorkspace());
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to load shared workspace.");
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }
+
+  async function selectSharedWorkspaceRoot() {
+    const bridge = getSharedStateBridge();
+    if (!bridge) {
+      setWorkspaceError("Shared state is available only in the Electron desktop app.");
+      return;
+    }
+
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
+    try {
+      const workspace = await bridge.selectWorkspaceRoot();
+      if (workspace) {
+        setActiveWorkspace(workspace);
+      }
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to select workspace root.");
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }
+
   async function refreshMcpStatus() {
     const bridge = getMcpBridge();
     if (!bridge) {
@@ -556,7 +583,7 @@ export function App() {
             })}
           </div>
         </section>
-        {activePage !== "terminal" ? <ResourcePage dismissedInstructionPrompts={dismissedInstructionPrompts} mcpMessages={mcpMessages} mcpSetupStatus={mcpSetupStatus} onDismissInstructionPrompt={dismissInstructionPrompt} onMcpAction={runMcpAction} page={activePage} pendingMcpClients={pendingMcpClients} /> : null}
+        {activePage !== "terminal" ? <ResourcePage activeWorkspace={activeWorkspace} dismissedInstructionPrompts={dismissedInstructionPrompts} mcpMessages={mcpMessages} mcpSetupStatus={mcpSetupStatus} onDismissInstructionPrompt={dismissInstructionPrompt} onMcpAction={runMcpAction} onSelectWorkspaceRoot={selectSharedWorkspaceRoot} page={activePage} pendingMcpClients={pendingMcpClients} workspaceError={workspaceError} workspaceLoading={workspaceLoading} /> : null}
       </section>
       {instructionPromptClient ? <InstructionPrompt client={instructionPromptClient} onDismiss={() => dismissInstructionPrompt(instructionPromptClient)} onInstall={() => runMcpAction(instructionPromptClient, "install-global-instructions")} /> : null}
       {renameDialog ? <RenameDialog dialog={renameDialog} onCancel={() => setRenameDialog(null)} onChange={updateRenameValue} onSubmit={submitRename} /> : null}
@@ -1318,25 +1345,14 @@ function getSubtreeMinPixels(node: SplitNode | undefined, dimension: "width" | "
   return Math.max(...node.children.map((child) => getSubtreeMinPixels(child, dimension)));
 }
 
-function ResourcePage({ dismissedInstructionPrompts, mcpMessages, mcpSetupStatus, onDismissInstructionPrompt, onMcpAction, page, pendingMcpClients }: { dismissedInstructionPrompts: Set<McpClient>; mcpMessages: Record<McpClient, string>; mcpSetupStatus: McpSetupStatus | null; onDismissInstructionPrompt: (client: McpClient) => void; onMcpAction: (client: McpClient, action: McpUiAction) => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean> }) {
+function ResourcePage({ activeWorkspace, dismissedInstructionPrompts, mcpMessages, mcpSetupStatus, onDismissInstructionPrompt, onMcpAction, onSelectWorkspaceRoot, page, pendingMcpClients, workspaceError, workspaceLoading }: { activeWorkspace: Workspace | null; dismissedInstructionPrompts: Set<McpClient>; mcpMessages: Record<McpClient, string>; mcpSetupStatus: McpSetupStatus | null; onDismissInstructionPrompt: (client: McpClient) => void; onMcpAction: (client: McpClient, action: McpUiAction) => void; onSelectWorkspaceRoot: () => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean>; workspaceError: string | null; workspaceLoading: boolean }) {
   if (page === "docs") {
     return (
       <section className="resource-page" aria-label="Docs">
         <ResourceHeader eyebrow="Knowledge Base" icon="note" label="Docs" description="Project documents that agents can read without crowding the terminal surface." />
-        <div className="resource-grid">
-          {docs.map((doc) => (
-            <article className="resource-card" key={doc.path}>
-              <div className="resource-card__topline">
-                <span>{doc.path}</span>
-                <span className="resource-card__icon"><AgentDeckIcon name="note" size={15} /></span>
-              </div>
-              <div>
-                <h2>{doc.title}</h2>
-                <p>{doc.summary}</p>
-              </div>
-            </article>
-          ))}
-        </div>
+        <WorkspaceGate activeWorkspace={activeWorkspace} onSelectWorkspaceRoot={onSelectWorkspaceRoot} workspaceError={workspaceError} workspaceLoading={workspaceLoading}>
+          {(workspace) => <DocsPanel workspace={workspace} />}
+        </WorkspaceGate>
       </section>
     );
   }
@@ -1345,17 +1361,9 @@ function ResourcePage({ dismissedInstructionPrompts, mcpMessages, mcpSetupStatus
     return (
       <section className="resource-page" aria-label="Todos">
         <ResourceHeader eyebrow="Execution Queue" icon="task" label="Todos" description="Shared project work that stays available to humans and local agents." />
-        <ol className="todo-list">
-          {todos.map((todo, index) => (
-            <li key={todo.text}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <div>
-                <strong>{todo.text}</strong>
-                <small>{todo.tag}</small>
-              </div>
-            </li>
-          ))}
-        </ol>
+        <WorkspaceGate activeWorkspace={activeWorkspace} onSelectWorkspaceRoot={onSelectWorkspaceRoot} workspaceError={workspaceError} workspaceLoading={workspaceLoading}>
+          {(workspace) => <TodosPanel workspace={workspace} />}
+        </WorkspaceGate>
       </section>
     );
   }
@@ -1412,19 +1420,437 @@ function ResourcePage({ dismissedInstructionPrompts, mcpMessages, mcpSetupStatus
   return (
     <section className="resource-page" aria-label="Memory">
       <ResourceHeader eyebrow="Shared Recall" icon="brain" label="Memory" description="Durable workspace facts and decisions retrieved through MCP." />
-      <div className="memory-list">
-        {memories.map((memory) => (
-          <article className="memory-card" key={memory.text}>
-            <span className="memory-card__icon"><AgentDeckIcon name="brain" size={16} /></span>
+      <WorkspaceGate activeWorkspace={activeWorkspace} onSelectWorkspaceRoot={onSelectWorkspaceRoot} workspaceError={workspaceError} workspaceLoading={workspaceLoading}>
+        {(workspace) => <NotesMemoryPanel workspace={workspace} />}
+      </WorkspaceGate>
+    </section>
+  );
+}
+
+function WorkspaceGate({ activeWorkspace, children, onSelectWorkspaceRoot, workspaceError, workspaceLoading }: { activeWorkspace: Workspace | null; children: (workspace: Workspace) => ReactNode; onSelectWorkspaceRoot: () => void; workspaceError: string | null; workspaceLoading: boolean }) {
+  if (workspaceLoading) {
+    return <p className="resource-empty">Loading shared workspace...</p>;
+  }
+
+  if (!activeWorkspace) {
+    return (
+      <article className="resource-card resource-empty-card">
+        <div>
+          <h2>Open a project folder</h2>
+          <p>Choose a project folder to create or reuse an AgentDeck workspace before syncing docs, todos, notes, and memory with MCP agents.</p>
+          {workspaceError ? <p className="resource-error">{workspaceError}</p> : null}
+        </div>
+        <div className="integration-card__actions">
+          <button onClick={onSelectWorkspaceRoot} type="button">Open Project Folder</button>
+        </div>
+      </article>
+    );
+  }
+
+  return children(activeWorkspace);
+}
+
+function TodosPanel({ workspace }: { workspace: Workspace }) {
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<Priority>("medium");
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadTodos() {
+    const bridge = getSharedStateBridge();
+    if (!bridge) {
+      setError("Shared state is available only in the Electron desktop app.");
+      return;
+    }
+
+    try {
+      setTodos(await bridge.listTodos(workspace.id));
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load todos.");
+    }
+  }
+
+  useEffect(() => {
+    void loadTodos();
+  }, [workspace.id]);
+
+  async function submitTodo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      return;
+    }
+
+    try {
+      const bridge = getSharedStateBridge();
+      const todo = await bridge?.createTodo({ description: description.trim(), priority, title: nextTitle, workspaceId: workspace.id });
+      if (todo) {
+        setTodos((currentTodos) => [...currentTodos, todo]);
+      }
+      setTitle("");
+      setDescription("");
+      setPriority("medium");
+      setIsAddDialogOpen(false);
+      setError(null);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Unable to create todo.");
+    }
+  }
+
+  async function updateTodoStatus(todoId: string, status: TodoStatus) {
+    try {
+      const updated = await getSharedStateBridge()?.updateTodo(todoId, { status });
+      if (updated) {
+        setTodos((currentTodos) => currentTodos.map((todo) => (todo.id === todoId ? updated : todo)));
+      }
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Unable to update todo.");
+    }
+  }
+
+  async function deleteTodo(todoId: string) {
+    try {
+      await getSharedStateBridge()?.deleteTodo(todoId);
+      setTodos((currentTodos) => currentTodos.filter((todo) => todo.id !== todoId));
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete todo.");
+    }
+  }
+
+  return (
+    <>
+      <ResourceWorkspaceMeta workspace={workspace} />
+      <div className="resource-toolbar">
+        <button onClick={() => setIsAddDialogOpen(true)} type="button">Add Todo</button>
+      </div>
+      {isAddDialogOpen ? (
+        <ResourceDialog title="Add Todo" onClose={() => setIsAddDialogOpen(false)}>
+          <form className="resource-form" onSubmit={submitTodo}>
+            <input aria-label="Todo title" autoFocus onChange={(event) => setTitle(event.target.value)} placeholder="Todo title" value={title} />
+            <textarea aria-label="Todo description" onChange={(event) => setDescription(event.target.value)} placeholder="Description" value={description} />
+            <select aria-label="Todo priority" onChange={(event) => setPriority(event.target.value as Priority)} value={priority}>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <div className="resource-dialog__actions">
+              <button onClick={() => setIsAddDialogOpen(false)} type="button">Cancel</button>
+              <button type="submit">Add Todo</button>
+            </div>
+          </form>
+        </ResourceDialog>
+      ) : null}
+      {error ? <p className="resource-error">{error}</p> : null}
+      {todos.length === 0 ? <p className="resource-empty">No shared todos yet.</p> : null}
+      <ol className="todo-list">
+        {todos.map((todo, index) => (
+          <li key={todo.id}>
+            <span>{String(index + 1).padStart(2, "0")}</span>
             <div>
-              <span>{memory.label}</span>
-              <p>{memory.text}</p>
+              <strong>{todo.title}</strong>
+              <small>{todo.status.replaceAll("_", " ")} / {todo.priority}{todo.description ? ` / ${todo.description}` : ""}</small>
+              <div className="integration-card__actions">
+                <button onClick={() => updateTodoStatus(todo.id, "in_progress")} type="button">Start</button>
+                <button onClick={() => updateTodoStatus(todo.id, "done")} type="button">Complete</button>
+                <button onClick={() => deleteTodo(todo.id)} type="button">Delete</button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+function NotesMemoryPanel({ workspace }: { workspace: Workspace }) {
+  const [activeTab, setActiveTab] = useState<MemoryPageTab>("notes");
+  return (
+    <>
+      <ResourceWorkspaceMeta workspace={workspace} />
+      <div className="resource-tabs" role="tablist" aria-label="Memory page tabs">
+        <button aria-selected={activeTab === "notes"} onClick={() => setActiveTab("notes")} role="tab" type="button">Notes</button>
+        <button aria-selected={activeTab === "memory"} onClick={() => setActiveTab("memory")} role="tab" type="button">Memory entries</button>
+      </div>
+      {activeTab === "notes" ? <NotesPanel workspace={workspace} /> : <MemoryPanel workspace={workspace} />}
+    </>
+  );
+}
+
+function NotesPanel({ workspace }: { workspace: Workspace }) {
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadNotes() {
+    try {
+      setNotes((await getSharedStateBridge()?.listNotes(workspace.id)) ?? []);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load notes.");
+    }
+  }
+
+  useEffect(() => {
+    void loadNotes();
+  }, [workspace.id]);
+
+  async function submitNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      return;
+    }
+
+    try {
+      if (editingNoteId) {
+        const updated = await getSharedStateBridge()?.updateNote(editingNoteId, { body, title: nextTitle });
+        if (updated) {
+          setNotes((currentNotes) => currentNotes.map((note) => (note.id === editingNoteId ? updated : note)));
+        }
+      } else {
+        const note = await getSharedStateBridge()?.createNote({ body, source: "human", title: nextTitle, workspaceId: workspace.id });
+        if (note) {
+          setNotes((currentNotes) => [note, ...currentNotes]);
+        }
+      }
+      setEditingNoteId(null);
+      setTitle("");
+      setBody("");
+      setIsNoteDialogOpen(false);
+      setError(null);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Unable to save note.");
+    }
+  }
+
+  async function deleteNote(noteId: string) {
+    try {
+      await getSharedStateBridge()?.deleteNote(noteId);
+      setNotes((currentNotes) => currentNotes.filter((note) => note.id !== noteId));
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete note.");
+    }
+  }
+
+  return (
+    <>
+      <div className="resource-toolbar">
+        <button onClick={() => { setEditingNoteId(null); setTitle(""); setBody(""); setIsNoteDialogOpen(true); }} type="button">Add Note</button>
+      </div>
+      {isNoteDialogOpen ? (
+        <ResourceDialog title={editingNoteId ? "Edit Note" : "Add Note"} onClose={() => setIsNoteDialogOpen(false)}>
+          <form className="resource-form" onSubmit={submitNote}>
+            <input aria-label="Note title" autoFocus onChange={(event) => setTitle(event.target.value)} placeholder="Note title" value={title} />
+            <textarea aria-label="Note body" onChange={(event) => setBody(event.target.value)} placeholder="Markdown note body" value={body} />
+            <div className="resource-dialog__actions">
+              <button onClick={() => setIsNoteDialogOpen(false)} type="button">Cancel</button>
+              <button type="submit">{editingNoteId ? "Save Note" : "Add Note"}</button>
+            </div>
+          </form>
+        </ResourceDialog>
+      ) : null}
+      {error ? <p className="resource-error">{error}</p> : null}
+      {notes.length === 0 ? <p className="resource-empty">No shared notes yet.</p> : null}
+      <div className="memory-list">
+        {notes.map((note) => (
+          <article className="memory-card" key={note.id}>
+            <span className="memory-card__icon"><AgentDeckIcon name="note" size={16} /></span>
+            <div>
+              <span>{note.source}</span>
+              <p><strong>{note.title}</strong></p>
+              <p>{note.body || "No body yet."}</p>
+              <div className="integration-card__actions">
+                <button onClick={() => { setEditingNoteId(note.id); setTitle(note.title); setBody(note.body); setIsNoteDialogOpen(true); }} type="button">Edit</button>
+                <button onClick={() => deleteNote(note.id)} type="button">Delete Note</button>
+              </div>
             </div>
           </article>
         ))}
       </div>
-    </section>
+    </>
   );
+}
+
+function MemoryPanel({ workspace }: { workspace: Workspace }) {
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [isMemoryDialogOpen, setIsMemoryDialogOpen] = useState(false);
+  const [content, setContent] = useState("");
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState<MemoryType>("fact");
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadMemories() {
+    try {
+      setMemories((await getSharedStateBridge()?.listMemories(workspace.id)) ?? []);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load memories.");
+    }
+  }
+
+  useEffect(() => {
+    void loadMemories();
+  }, [workspace.id]);
+
+  async function submitMemory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextContent = content.trim();
+    if (!nextContent) {
+      return;
+    }
+
+    try {
+      const memory = await getSharedStateBridge()?.storeMemory({ content: nextContent, source: "human", type, workspaceId: workspace.id });
+      if (memory) {
+        setMemories((currentMemories) => [memory, ...currentMemories]);
+      }
+      setContent("");
+      setType("fact");
+      setIsMemoryDialogOpen(false);
+      setError(null);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Unable to store memory.");
+    }
+  }
+
+  async function searchMemories(nextQuery: string) {
+    setQuery(nextQuery);
+    try {
+      setMemories(nextQuery.trim() ? ((await getSharedStateBridge()?.searchMemory(workspace.id, nextQuery.trim())) ?? []) : ((await getSharedStateBridge()?.listMemories(workspace.id)) ?? []));
+      setError(null);
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : "Unable to search memory.");
+    }
+  }
+
+  return (
+    <>
+      <div className="resource-toolbar">
+        <button onClick={() => setIsMemoryDialogOpen(true)} type="button">Store Memory</button>
+        <input aria-label="Memory search" className="resource-search" onChange={(event) => void searchMemories(event.target.value)} placeholder="Search memory" value={query} />
+      </div>
+      {isMemoryDialogOpen ? (
+        <ResourceDialog title="Store Memory" onClose={() => setIsMemoryDialogOpen(false)}>
+          <form className="resource-form" onSubmit={submitMemory}>
+            <textarea aria-label="Memory content" autoFocus onChange={(event) => setContent(event.target.value)} placeholder="Durable fact, decision, convention, risk, setup note, or handoff" value={content} />
+            <select aria-label="Memory type" onChange={(event) => setType(event.target.value as MemoryType)} value={type}>
+              <option value="fact">Fact</option>
+              <option value="decision">Decision</option>
+              <option value="convention">Convention</option>
+              <option value="handoff">Handoff</option>
+              <option value="setup">Setup</option>
+              <option value="risk">Risk</option>
+            </select>
+            <div className="resource-dialog__actions">
+              <button onClick={() => setIsMemoryDialogOpen(false)} type="button">Cancel</button>
+              <button type="submit">Store Memory</button>
+            </div>
+          </form>
+        </ResourceDialog>
+      ) : null}
+      {error ? <p className="resource-error">{error}</p> : null}
+      {memories.length === 0 ? <p className="resource-empty">No memory entries yet.</p> : null}
+      <div className="memory-list">
+        {memories.map((memory) => (
+          <article className="memory-card" key={memory.id}>
+            <span className="memory-card__icon"><AgentDeckIcon name="brain" size={16} /></span>
+            <div>
+              <span>{memory.type}</span>
+              <p>{memory.content}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function DocsPanel({ workspace }: { workspace: Workspace }) {
+  const [docs, setDocs] = useState<WorkspaceDoc[]>([]);
+  const [selectedDoc, setSelectedDoc] = useState<WorkspaceDocContent | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadDocs() {
+      try {
+        setDocs((await getSharedStateBridge()?.listDocs(workspace.id)) ?? []);
+        setError(null);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Unable to list docs.");
+      }
+    }
+
+    void loadDocs();
+  }, [workspace.id]);
+
+  async function openDoc(path: string) {
+    try {
+      const doc = await getSharedStateBridge()?.readDoc(workspace.id, path);
+      if (doc) {
+        setSelectedDoc(doc);
+      }
+      setError(null);
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : "Unable to read doc.");
+    }
+  }
+
+  return (
+    <>
+      <ResourceWorkspaceMeta workspace={workspace} />
+      {error ? <p className="resource-error">{error}</p> : null}
+      {docs.length === 0 ? <p className="resource-empty">No docs found under {workspace.rootPath}/docs.</p> : null}
+      <div className={`docs-layout${selectedDoc ? " docs-layout--preview" : ""}`}>
+        <div className="resource-grid docs-grid">
+          {docs.map((doc) => (
+            <button className="resource-card resource-card--button" aria-pressed={selectedDoc?.path === doc.path} key={doc.path} onClick={() => openDoc(doc.path)} type="button">
+              <div className="resource-card__topline">
+                <span>{doc.path}</span>
+                <span className="resource-card__icon"><AgentDeckIcon name="note" size={15} /></span>
+              </div>
+              <div>
+                <h2>{getDocTitle(doc.path)}</h2>
+                <p>{formatBytes(doc.size)} / {new Date(doc.updatedAt).toLocaleDateString()}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+        <aside className="doc-preview-panel" aria-label="Doc preview" aria-hidden={!selectedDoc}>
+          {selectedDoc ? (
+            <article className="doc-preview">
+              <div className="doc-preview__header">
+                <span>{selectedDoc.path}</span>
+                <button aria-label="Close doc preview" onClick={() => setSelectedDoc(null)} type="button">Close</button>
+              </div>
+              <pre>{selectedDoc.text}</pre>
+            </article>
+          ) : null}
+        </aside>
+      </div>
+    </>
+  );
+}
+
+function ResourceWorkspaceMeta({ workspace }: { workspace: Workspace }) {
+  return <p className="resource-workspace-meta">{workspace.name} / {workspace.rootPath}</p>;
+}
+
+function getDocTitle(path: string) {
+  return path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || path;
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  return `${Math.round(size / 1024)} KB`;
 }
 
 function InstructionNoticeList({ dismissedInstructionPrompts, mcpSetupStatus, onDismiss, onInstall, pendingMcpClients }: { dismissedInstructionPrompts: Set<McpClient>; mcpSetupStatus: McpSetupStatus | null; onDismiss: (client: McpClient) => void; onInstall: (client: McpClient) => void; pendingMcpClients: Record<McpClient, boolean> }) {
@@ -1490,6 +1916,23 @@ function InstructionPrompt({ client, onDismiss, onInstall }: { client: McpClient
 
 function getMcpClientLabel(client: McpClient) {
   return mcpClients.find((item) => item.id === client)?.label ?? client;
+}
+
+function ResourceDialog({ children, onClose, title }: { children: ReactNode; onClose: () => void; title: string }) {
+  return (
+    <div className="resource-dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <section aria-label={title} aria-modal="true" className="resource-dialog" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="resource-dialog__header">
+          <div>
+            <span>New Entry</span>
+            <h2>{title}</h2>
+          </div>
+          <button aria-label={`Close ${title}`} onClick={onClose} type="button">Close</button>
+        </div>
+        {children}
+      </section>
+    </div>
+  );
 }
 
 function ResourceHeader({ description, eyebrow, icon, label }: { description: string; eyebrow: string; icon: AgentDeckIconName; label: string }) {

@@ -1,4 +1,5 @@
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
+import type { CreateMemoryInput, CreateNoteInput, CreateTodoInput, Memory, Note, Todo, UpdateNoteInput, UpdateTodoInput, Workspace } from "@agentdeck/core";
 import type { WorkspaceDocument } from "../workspace/schema.js";
 
 export const terminalChannels = {
@@ -22,6 +23,24 @@ export const mcpChannels = {
   install: "mcp:install",
   installInstructions: "mcp:install-instructions",
   uninstall: "mcp:uninstall",
+} as const;
+
+export const sharedStateChannels = {
+  bootstrapWorkspace: "shared:workspace:bootstrap",
+  createNote: "shared:notes:create",
+  createTodo: "shared:todos:create",
+  deleteNote: "shared:notes:delete",
+  deleteTodo: "shared:todos:delete",
+  listDocs: "shared:docs:list",
+  listMemories: "shared:memory:list",
+  listNotes: "shared:notes:list",
+  listTodos: "shared:todos:list",
+  readDoc: "shared:docs:read",
+  searchMemory: "shared:memory:search",
+  selectWorkspaceRoot: "shared:workspace:select-root",
+  storeMemory: "shared:memory:store",
+  updateNote: "shared:notes:update",
+  updateTodo: "shared:todos:update",
 } as const;
 
 export type McpClient = "opencode" | "claude-code";
@@ -75,8 +94,37 @@ export interface McpBridge {
   uninstall: (client: McpClient) => Promise<McpActionResult>;
 }
 
+export interface WorkspaceDoc {
+  path: string;
+  size: number;
+  updatedAt: string;
+}
+
+export interface WorkspaceDocContent extends WorkspaceDoc {
+  text: string;
+}
+
+export interface SharedStateBridge {
+  bootstrapWorkspace: () => Promise<Workspace | null>;
+  createNote: (input: CreateNoteInput) => Promise<Note>;
+  createTodo: (input: CreateTodoInput) => Promise<Todo>;
+  deleteNote: (noteId: string) => Promise<Note>;
+  deleteTodo: (todoId: string) => Promise<Todo>;
+  listDocs: (workspaceId: string) => Promise<WorkspaceDoc[]>;
+  listMemories: (workspaceId: string) => Promise<Memory[]>;
+  listNotes: (workspaceId: string) => Promise<Note[]>;
+  listTodos: (workspaceId: string) => Promise<Todo[]>;
+  readDoc: (workspaceId: string, path: string) => Promise<WorkspaceDocContent>;
+  searchMemory: (workspaceId: string, query: string) => Promise<Memory[]>;
+  selectWorkspaceRoot: () => Promise<Workspace | null>;
+  storeMemory: (input: CreateMemoryInput) => Promise<Memory>;
+  updateNote: (noteId: string, input: UpdateNoteInput) => Promise<Note>;
+  updateTodo: (todoId: string, input: UpdateTodoInput) => Promise<Todo>;
+}
+
 export interface AgentDeckBridge {
   mcp: McpBridge;
+  shared: SharedStateBridge;
   terminal: TerminalBridge;
   workspace: WorkspaceBridge;
 }
@@ -97,4 +145,8 @@ export function getWorkspaceBridge() {
 
 export function getMcpBridge() {
   return typeof window === "undefined" ? undefined : window.agentDeck?.mcp;
+}
+
+export function getSharedStateBridge() {
+  return typeof window === "undefined" ? undefined : window.agentDeck?.shared;
 }

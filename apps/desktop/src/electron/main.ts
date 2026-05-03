@@ -2,19 +2,22 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
-import { lstat, readFile, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, parse } from "node:path";
+import { lstat, open, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildAgentDeckServerSpec, createManualConfigSnippet, createMcpInstructions, getClientConfigPath, getMcpInstructionsPath, getOpenCodeGlobalConfigPath, installMcpConfig, installMcpInstructions, removeMcpConfig, type McpClient, type McpInstructionScope } from "@agentdeck/mcp-server";
+import { AgentDeckStore } from "@agentdeck/core";
 import * as pty from "node-pty";
 import { resolveDefaultShell, TerminalSessionHost, type PtyAdapter, type ResolvedShell, type TerminalSpawnOptions } from "@agentdeck/terminal";
-import { mcpChannels, terminalChannels, workspaceChannels, type McpActionResult, type McpClientSetupStatus, type McpSetupStatus, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { mcpChannels, sharedStateChannels, terminalChannels, workspaceChannels, type McpActionResult, type McpClientSetupStatus, type McpSetupStatus, type TerminalCreateRequest, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import { parseWorkspaceDocument } from "../workspace/schema.js";
 
 const MAX_TERMINAL_ID_LENGTH = 80;
 const MAX_TERMINAL_WRITE_LENGTH = 16_384;
 const MAX_WORKSPACE_FILE_BYTES = 1_000_000;
 const CLAUDE_MCP_COMMAND_TIMEOUT_MS = 15_000;
+const MAX_SHARED_DOC_BYTES = 1_000_000;
+const supportedSharedDocExtensions = new Set([".adoc", ".md", ".mdx", ".rst", ".txt"]);
 const sessionOwners = new Map<string, number>();
 
 class NodePtyAdapter implements PtyAdapter {
@@ -177,6 +180,100 @@ function registerWorkspaceIpc() {
       console.error("Failed to import workspace", error);
       return null;
     }
+  });
+}
+
+function registerSharedStateIpc() {
+  ipcMain.handle(sharedStateChannels.bootstrapWorkspace, async (event) => {
+    if (!isTrustedIpcEvent(event)) {
+      return null;
+    }
+
+    const workspaces = await createSharedStateStore().listWorkspaces();
+    return workspaces.length === 1 ? workspaces[0] : null;
+  });
+
+  ipcMain.handle(sharedStateChannels.selectWorkspaceRoot, async (event) => {
+    if (!isTrustedIpcEvent(event)) {
+      return null;
+    }
+
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      defaultPath: app.getPath("home"),
+      properties: ["openDirectory"],
+      title: "Open AgentDeck project folder",
+    };
+    const result = ownerWindow ? await dialog.showOpenDialog(ownerWindow, options) : await dialog.showOpenDialog(options);
+    const rootPath = result.filePaths[0];
+    if (result.canceled || !rootPath) {
+      return null;
+    }
+
+    const store = createSharedStateStore();
+    return (await store.findWorkspaceByRootPath(rootPath)) ?? store.createWorkspace({ name: basename(rootPath), rootPath });
+  });
+
+  ipcMain.handle(sharedStateChannels.listTodos, async (event, workspaceId: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().listTodos(workspaceId) : []));
+  ipcMain.handle(sharedStateChannels.createTodo, async (event, input) => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to create todo from an untrusted renderer.");
+    }
+    return createSharedStateStore().createTodo(input);
+  });
+  ipcMain.handle(sharedStateChannels.updateTodo, async (event, todoId: string, input) => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to update todo from an untrusted renderer.");
+    }
+    return createSharedStateStore().updateTodo(todoId, input);
+  });
+  ipcMain.handle(sharedStateChannels.deleteTodo, async (event, todoId: string) => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to delete todo from an untrusted renderer.");
+    }
+    return createSharedStateStore().deleteTodo(todoId);
+  });
+
+  ipcMain.handle(sharedStateChannels.listNotes, async (event, workspaceId: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().listNotes(workspaceId) : []));
+  ipcMain.handle(sharedStateChannels.createNote, async (event, input) => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to create note from an untrusted renderer.");
+    }
+    return createSharedStateStore().createNote(input);
+  });
+  ipcMain.handle(sharedStateChannels.updateNote, async (event, noteId: string, input) => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to update note from an untrusted renderer.");
+    }
+    return createSharedStateStore().updateNote(noteId, input);
+  });
+  ipcMain.handle(sharedStateChannels.deleteNote, async (event, noteId: string) => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to delete note from an untrusted renderer.");
+    }
+    return createSharedStateStore().deleteNote(noteId);
+  });
+
+  ipcMain.handle(sharedStateChannels.listMemories, async (event, workspaceId: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().listMemories(workspaceId) : []));
+  ipcMain.handle(sharedStateChannels.searchMemory, async (event, workspaceId: string, query: string) => (isTrustedIpcEvent(event) ? createSharedStateStore().searchMemory(workspaceId, query) : []));
+  ipcMain.handle(sharedStateChannels.storeMemory, async (event, input) => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to store memory from an untrusted renderer.");
+    }
+    return createSharedStateStore().storeMemory(input);
+  });
+
+  ipcMain.handle(sharedStateChannels.listDocs, async (event, workspaceId: string): Promise<WorkspaceDoc[]> => {
+    if (!isTrustedIpcEvent(event)) {
+      return [];
+    }
+    return listWorkspaceDocs(createSharedStateStore(), workspaceId);
+  });
+  ipcMain.handle(sharedStateChannels.readDoc, async (event, workspaceId: string, path: string): Promise<WorkspaceDocContent> => {
+    if (!isTrustedIpcEvent(event)) {
+      throw new Error("Unable to read doc from an untrusted renderer.");
+    }
+    return readWorkspaceDoc(createSharedStateStore(), workspaceId, path);
   });
 }
 
@@ -552,6 +649,148 @@ function getAgentDeckStateFilePath() {
   return join(app.getPath("userData"), "agentdeck-state.json");
 }
 
+function createSharedStateStore() {
+  return new AgentDeckStore(getAgentDeckStateFilePath());
+}
+
+async function listWorkspaceDocs(store: AgentDeckStore, workspaceId: string): Promise<WorkspaceDoc[]> {
+  const workspace = await store.getWorkspace(workspaceId);
+  let docsRoot: string;
+  try {
+    docsRoot = await resolveWorkspaceDocsRoot(workspace.rootPath);
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const docs: WorkspaceDoc[] = [];
+  await collectWorkspaceDocs(docsRoot, docsRoot, docs);
+  return docs.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function readWorkspaceDoc(store: AgentDeckStore, workspaceId: string, docPath: string): Promise<WorkspaceDocContent> {
+  if (docPath.includes("\0")) {
+    throw new Error("Doc path contains an invalid null byte.");
+  }
+
+  if (isAbsolute(docPath)) {
+    throw new Error("Doc path must be relative to the workspace docs directory.");
+  }
+
+  const workspace = await store.getWorkspace(workspaceId);
+  const docsRoot = await resolveWorkspaceDocsRoot(workspace.rootPath);
+  const targetPath = resolve(docsRoot, docPath);
+  if (!isInsidePath(docsRoot, targetPath)) {
+    throw new Error("Doc path resolves outside the workspace docs directory.");
+  }
+
+  const canonicalDocsRoot = await realpath(docsRoot);
+  const canonicalTargetPath = await realpath(targetPath);
+  if (!isInsidePath(canonicalDocsRoot, canonicalTargetPath)) {
+    throw new Error("Doc path resolves outside the workspace docs directory.");
+  }
+
+  const linkStats = await lstat(targetPath);
+  if (linkStats.isSymbolicLink()) {
+    throw new Error(`Doc path is not a readable file: ${docPath}`);
+  }
+
+  if (!supportedSharedDocExtensions.has(extname(targetPath).toLowerCase())) {
+    throw new Error(`Unsupported doc extension: ${docPath}`);
+  }
+
+  const file = await open(canonicalTargetPath, "r");
+
+  try {
+    const stats = await file.stat();
+    if (!stats.isFile()) {
+      throw new Error(`Doc path is not a file: ${docPath}`);
+    }
+    if (stats.size > MAX_SHARED_DOC_BYTES) {
+      throw new Error(`Doc is too large to read: ${docPath}`);
+    }
+
+    return {
+      path: normalizeRelativeDocPath(relative(docsRoot, targetPath)),
+      size: stats.size,
+      text: await file.readFile("utf8"),
+      updatedAt: stats.mtime.toISOString(),
+    };
+  } finally {
+    await file.close();
+  }
+}
+
+async function collectWorkspaceDocs(docsRoot: string, currentPath: string, docs: WorkspaceDoc[]): Promise<void> {
+  const directoryStats = await lstat(currentPath);
+  if (directoryStats.isSymbolicLink() || !directoryStats.isDirectory()) {
+    return;
+  }
+
+  const entries = await readdir(currentPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+
+    const entryPath = join(currentPath, entry.name);
+    if (!isInsidePath(docsRoot, entryPath)) {
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      await collectWorkspaceDocs(docsRoot, entryPath, docs);
+      continue;
+    }
+
+    if (!entry.isFile() || !supportedSharedDocExtensions.has(extname(entry.name).toLowerCase())) {
+      continue;
+    }
+
+    const stats = await lstat(entryPath);
+    if (stats.size > MAX_SHARED_DOC_BYTES) {
+      continue;
+    }
+
+    docs.push({
+      path: normalizeRelativeDocPath(relative(docsRoot, entryPath)),
+      size: stats.size,
+      updatedAt: stats.mtime.toISOString(),
+    });
+  }
+}
+
+async function resolveWorkspaceDocsRoot(workspaceRootPath: string): Promise<string> {
+  const workspaceRoot = resolve(workspaceRootPath);
+  const docsRoot = resolve(workspaceRoot, "docs");
+  const stats = await lstat(docsRoot);
+  if (stats.isSymbolicLink()) {
+    throw new Error("Refusing to access symlinked workspace docs directory.");
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`Docs path is not a directory: ${docsRoot}`);
+  }
+
+  const canonicalWorkspaceRoot = await realpath(workspaceRoot);
+  const canonicalDocsRoot = await realpath(docsRoot);
+  if (!isInsidePath(canonicalWorkspaceRoot, canonicalDocsRoot)) {
+    throw new Error("Refusing to access docs directory outside workspace root.");
+  }
+
+  return docsRoot;
+}
+
+function isInsidePath(parentPath: string, childPath: string): boolean {
+  const relativePath = relative(parentPath, childPath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+function normalizeRelativeDocPath(path: string) {
+  return path.replaceAll("\\", "/");
+}
+
 function getClaudeUserConfigPath() {
   return join(app.getPath("home"), ".claude.json");
 }
@@ -875,6 +1114,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerMcpIpc();
+  registerSharedStateIpc();
   registerTerminalIpc();
   registerWorkspaceIpc();
   const window = createWindow();
@@ -882,7 +1122,7 @@ app.whenReady().then(() => {
   if (process.env.AGENTDECK_SMOKE_TEST === "1") {
     const fallbackTimer = setTimeout(() => process.exit(1), 5_000);
     window.webContents.once("did-finish-load", async () => {
-      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.mcp && window.agentDeck?.terminal && window.agentDeck?.workspace)");
+      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.mcp && window.agentDeck?.shared && window.agentDeck?.terminal && window.agentDeck?.workspace)");
       console.log(`AgentDeck preload bridge: ${hasBridge ? "available" : "missing"}`);
       setTimeout(() => {
         clearTimeout(fallbackTimer);

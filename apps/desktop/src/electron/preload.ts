@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { mcpChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type McpActionResult, type McpClient, type McpInstructionScope, type McpSetupStatus, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { mcpChannels, sharedStateChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type McpActionResult, type McpClient, type McpInstructionScope, type McpSetupStatus, type TerminalCreateRequest, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
+import type { CreateMemoryInput, CreateNoteInput, CreateTodoInput, Memory, Note, Todo, UpdateNoteInput, UpdateTodoInput, Workspace } from "@agentdeck/core";
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
 import type { WorkspaceDocument } from "../workspace/schema.js";
 
@@ -11,6 +12,23 @@ const bridge: AgentDeckBridge = {
     install: (client: McpClient) => ipcRenderer.invoke(mcpChannels.install, client) as Promise<McpActionResult>,
     installInstructions: (client: McpClient, scope: McpInstructionScope) => ipcRenderer.invoke(mcpChannels.installInstructions, client, scope) as Promise<McpActionResult>,
     uninstall: (client: McpClient) => ipcRenderer.invoke(mcpChannels.uninstall, client) as Promise<McpActionResult>,
+  },
+  shared: {
+    bootstrapWorkspace: () => ipcRenderer.invoke(sharedStateChannels.bootstrapWorkspace) as Promise<Workspace | null>,
+    createNote: (input: CreateNoteInput) => ipcRenderer.invoke(sharedStateChannels.createNote, input) as Promise<Note>,
+    createTodo: (input: CreateTodoInput) => ipcRenderer.invoke(sharedStateChannels.createTodo, input) as Promise<Todo>,
+    deleteNote: (noteId: string) => ipcRenderer.invoke(sharedStateChannels.deleteNote, noteId) as Promise<Note>,
+    deleteTodo: (todoId: string) => ipcRenderer.invoke(sharedStateChannels.deleteTodo, todoId) as Promise<Todo>,
+    listDocs: (workspaceId: string) => ipcRenderer.invoke(sharedStateChannels.listDocs, workspaceId) as Promise<WorkspaceDoc[]>,
+    listMemories: (workspaceId: string) => ipcRenderer.invoke(sharedStateChannels.listMemories, workspaceId) as Promise<Memory[]>,
+    listNotes: (workspaceId: string) => ipcRenderer.invoke(sharedStateChannels.listNotes, workspaceId) as Promise<Note[]>,
+    listTodos: (workspaceId: string) => ipcRenderer.invoke(sharedStateChannels.listTodos, workspaceId) as Promise<Todo[]>,
+    readDoc: (workspaceId: string, path: string) => ipcRenderer.invoke(sharedStateChannels.readDoc, workspaceId, path) as Promise<WorkspaceDocContent>,
+    searchMemory: (workspaceId: string, query: string) => ipcRenderer.invoke(sharedStateChannels.searchMemory, workspaceId, query) as Promise<Memory[]>,
+    selectWorkspaceRoot: () => ipcRenderer.invoke(sharedStateChannels.selectWorkspaceRoot) as Promise<Workspace | null>,
+    storeMemory: (input: CreateMemoryInput) => ipcRenderer.invoke(sharedStateChannels.storeMemory, input) as Promise<Memory>,
+    updateNote: (noteId: string, input: UpdateNoteInput) => ipcRenderer.invoke(sharedStateChannels.updateNote, noteId, input) as Promise<Note>,
+    updateTodo: (todoId: string, input: UpdateTodoInput) => ipcRenderer.invoke(sharedStateChannels.updateTodo, todoId, input) as Promise<Todo>,
   },
   terminal: {
     closeSession: (id: string) => ipcRenderer.invoke(terminalChannels.close, id) as Promise<boolean>,
