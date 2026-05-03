@@ -1,19 +1,20 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent, type OpenDialogOptions, type SaveDialogOptions } from "electron";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { spawnSync } from "node:child_process";
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { lstat, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { dirname, join, parse } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildAgentDeckServerSpec, createManualConfigSnippet, createMcpInstructions, getClientConfigPath, installMcpConfig, installMcpInstructions, removeMcpConfig, type McpClient, type McpInstructionScope } from "@agentdeck/mcp-server";
+import { buildAgentDeckServerSpec, createManualConfigSnippet, createMcpInstructions, getClientConfigPath, getMcpInstructionsPath, getOpenCodeGlobalConfigPath, installMcpConfig, installMcpInstructions, removeMcpConfig, type McpClient, type McpInstructionScope } from "@agentdeck/mcp-server";
 import * as pty from "node-pty";
 import { resolveDefaultShell, TerminalSessionHost, type PtyAdapter, type ResolvedShell, type TerminalSpawnOptions } from "@agentdeck/terminal";
-import { mcpChannels, terminalChannels, workspaceChannels, type McpActionResult, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { mcpChannels, terminalChannels, workspaceChannels, type McpActionResult, type McpClientSetupStatus, type McpSetupStatus, type TerminalCreateRequest } from "../terminal/bridge.js";
 import { parseWorkspaceDocument } from "../workspace/schema.js";
 
 const MAX_TERMINAL_ID_LENGTH = 80;
 const MAX_TERMINAL_WRITE_LENGTH = 16_384;
 const MAX_WORKSPACE_FILE_BYTES = 1_000_000;
+const CLAUDE_MCP_COMMAND_TIMEOUT_MS = 15_000;
 const sessionOwners = new Map<string, number>();
 
 class NodePtyAdapter implements PtyAdapter {
@@ -205,6 +206,14 @@ function registerMcpIpc() {
     }
   });
 
+  ipcMain.handle(mcpChannels.getStatus, async (event): Promise<McpSetupStatus> => {
+    if (!isTrustedIpcEvent(event)) {
+      return createEmptyMcpSetupStatus("Unable to inspect MCP status from an untrusted renderer.");
+    }
+
+    return getMcpSetupStatus();
+  });
+
   ipcMain.handle(mcpChannels.install, async (event, clientPayload: unknown): Promise<McpActionResult> => {
     if (!isTrustedIpcEvent(event)) {
       return createMcpErrorResult("Unable to install MCP config from an untrusted renderer.");
@@ -215,8 +224,7 @@ function registerMcpIpc() {
       return createMcpErrorResult("Unknown MCP client.");
     }
 
-    const projectRoot = await selectMcpProjectRoot(event, `Install AgentDeck MCP for ${getMcpClientLabel(client)}`);
-    if (!projectRoot) {
+    if (!(await confirmGlobalMcpChange(event, client, "install"))) {
       return {
         changed: false,
         message: "MCP install cancelled.",
@@ -226,12 +234,12 @@ function registerMcpIpc() {
     }
 
     try {
-      const result = await installMcpConfig({ client, configPath: getClientConfigPath(client, projectRoot), server: createAgentDeckMcpServerSpec() });
+      const result = await installGlobalMcpConfig(client);
       return {
         backupPath: result.backupPath,
         changed: result.changed,
         configPath: result.configPath,
-        message: result.changed ? `${getMcpClientLabel(client)} config updated.` : `${getMcpClientLabel(client)} already has AgentDeck MCP configured.`,
+        message: result.changed ? `${getMcpClientLabel(client)} global MCP config updated.` : `${getMcpClientLabel(client)} already has AgentDeck MCP configured globally.`,
         ok: true,
         status: "installed",
       };
@@ -323,8 +331,7 @@ function registerMcpIpc() {
       return createMcpErrorResult("Unknown MCP client.");
     }
 
-    const projectRoot = await selectMcpProjectRoot(event, `Uninstall AgentDeck MCP for ${getMcpClientLabel(client)}`);
-    if (!projectRoot) {
+    if (!(await confirmGlobalMcpChange(event, client, "uninstall"))) {
       return {
         changed: false,
         message: "MCP uninstall cancelled.",
@@ -334,7 +341,7 @@ function registerMcpIpc() {
     }
 
     try {
-      const result = await removeMcpConfig({ client, configPath: getClientConfigPath(client, projectRoot) });
+      const result = await removeGlobalMcpConfig(client);
       return {
         backupPath: result.backupPath,
         changed: result.changed,
@@ -401,6 +408,120 @@ function getMcpClientLabel(client: McpClient): string {
   return client === "opencode" ? "OpenCode" : "Claude Code";
 }
 
+async function installGlobalMcpConfig(client: McpClient) {
+  if (client === "opencode") {
+    return installMcpConfig({ client, configPath: getOpenCodeGlobalConfigPath(app.getPath("home")), server: createAgentDeckMcpServerSpec() });
+  }
+
+  const server = createAgentDeckMcpServerSpec();
+  const configPath = getClaudeUserConfigPath();
+  const previousConfigText = await readTextIfExistsSafe(configPath);
+  try {
+    await runClaudeMcpCommand(["mcp", "remove", "agentdeck", "--scope", "user"], { allowFailure: true });
+    await runClaudeMcpCommand(["mcp", "add", "--transport", "stdio", "--scope", "user", "agentdeck", "--", server.command, ...server.args]);
+  } catch (error) {
+    await assertSafeStatusFileTarget(configPath);
+    if (previousConfigText !== undefined) {
+      await writeFile(configPath, previousConfigText, "utf8");
+    } else {
+      await removeFileIfExists(configPath);
+    }
+
+    throw error;
+  }
+
+  return {
+    changed: true,
+    configPath,
+  };
+}
+
+async function removeGlobalMcpConfig(client: McpClient) {
+  if (client === "opencode") {
+    return removeMcpConfig({ client, configPath: getOpenCodeGlobalConfigPath(app.getPath("home")) });
+  }
+
+  if (!(await isClaudeAgentDeckMcpInstalled())) {
+    return {
+      changed: false,
+      configPath: getClaudeUserConfigPath(),
+    };
+  }
+
+  await runClaudeMcpCommand(["mcp", "remove", "agentdeck", "--scope", "user"]);
+  return {
+    changed: true,
+    configPath: getClaudeUserConfigPath(),
+  };
+}
+
+async function getMcpSetupStatus(): Promise<McpSetupStatus> {
+  const [opencode, claudeCode] = await Promise.all([
+    resolveMcpClientSetupStatus(getOpenCodeSetupStatus(), "Unable to read OpenCode MCP status."),
+    resolveMcpClientSetupStatus(getClaudeCodeSetupStatus(), "Unable to read Claude Code MCP status."),
+  ]);
+  return {
+    "claude-code": claudeCode,
+    opencode,
+  };
+}
+
+async function resolveMcpClientSetupStatus(statusPromise: Promise<McpClientSetupStatus>, fallbackMessage: string): Promise<McpClientSetupStatus> {
+  try {
+    return await statusPromise;
+  } catch (error) {
+    return {
+      instructionsInstalled: false,
+      mcpInstalled: false,
+      message: error instanceof Error ? error.message : fallbackMessage,
+    };
+  }
+}
+
+async function getOpenCodeSetupStatus(): Promise<McpClientSetupStatus> {
+  const homeDir = app.getPath("home");
+  const configPath = getOpenCodeGlobalConfigPath(homeDir);
+  const instructionsPath = getMcpInstructionsPath({ client: "opencode", homeDir, scope: "global" });
+
+  try {
+    const config = asObject(await readJsonIfExistsSafe(configPath));
+    const mcp = asObject(config.mcp);
+    const instructions = Array.isArray(config.instructions) ? config.instructions : [];
+    return {
+      configPath,
+      instructionsInstalled: instructions.includes(instructionsPath) && (await fileContains(instructionsPath, "<!-- agentdeck:start -->")),
+      instructionsPath,
+      mcpInstalled: "agentdeck" in mcp,
+    };
+  } catch (error) {
+    return {
+      configPath,
+      instructionsInstalled: false,
+      instructionsPath,
+      mcpInstalled: false,
+      message: error instanceof Error ? error.message : "Unable to read OpenCode MCP status.",
+    };
+  }
+}
+
+async function getClaudeCodeSetupStatus(): Promise<McpClientSetupStatus> {
+  const homeDir = app.getPath("home");
+  const instructionsPath = getMcpInstructionsPath({ client: "claude-code", homeDir, scope: "global" });
+  return {
+    configPath: getClaudeUserConfigPath(),
+    instructionsInstalled: await fileContains(instructionsPath, "<!-- agentdeck:start -->"),
+    instructionsPath,
+    mcpInstalled: await isClaudeAgentDeckMcpInstalled(),
+  };
+}
+
+function createEmptyMcpSetupStatus(message: string): McpSetupStatus {
+  return {
+    "claude-code": { instructionsInstalled: false, mcpInstalled: false, message },
+    opencode: { instructionsInstalled: false, mcpInstalled: false, message },
+  };
+}
+
 function createAgentDeckMcpServerSpec() {
   return buildAgentDeckServerSpec({ command: resolveNodeCommand(), commandArgs: [resolveAgentDeckMcpCliPath()], stateFilePath: getAgentDeckStateFilePath() });
 }
@@ -417,7 +538,7 @@ function resolveAgentDeckMcpCliPath() {
 
 function resolveNodeCommand() {
   if (process.platform === "win32") {
-    if (!isWindowsCommandAvailable("node.exe")) {
+    if (!isCommandAvailable("node.exe")) {
       throw new Error("Unable to find node.exe on PATH for AgentDeck MCP config.");
     }
 
@@ -429,6 +550,161 @@ function resolveNodeCommand() {
 
 function getAgentDeckStateFilePath() {
   return join(app.getPath("userData"), "agentdeck-state.json");
+}
+
+function getClaudeUserConfigPath() {
+  return join(app.getPath("home"), ".claude.json");
+}
+
+async function readTextIfExistsSafe(filePath: string): Promise<string | undefined> {
+  await assertSafeStatusFileTarget(filePath);
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return undefined;
+    }
+
+    throw error;
+  }
+}
+
+async function removeFileIfExists(filePath: string): Promise<void> {
+  try {
+    await unlink(filePath);
+  } catch (error) {
+    if (!isFileNotFoundError(error)) {
+      throw error;
+    }
+  }
+}
+
+function runClaudeMcpCommand(args: string[], options: { allowFailure?: boolean } = {}): Promise<void> {
+  if (!isCommandAvailable("claude")) {
+    throw new Error("Unable to find Claude Code CLI on PATH for global MCP install.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn("claude", args, { windowsHide: true });
+    let output = "";
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error("Claude Code MCP command timed out."));
+    }, CLAUDE_MCP_COMMAND_TIMEOUT_MS);
+
+    child.stdout?.on("data", (data: Buffer) => {
+      output += data.toString("utf8");
+    });
+    child.stderr?.on("data", (data: Buffer) => {
+      output += data.toString("utf8");
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (options.allowFailure || code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error((output || "Claude Code MCP command failed.").trim()));
+    });
+  });
+}
+
+async function isClaudeAgentDeckMcpInstalled() {
+  const config = asObject(await readJsonIfExistsSafe(getClaudeUserConfigPath()));
+  const mcpServers = asObject(config.mcpServers);
+  return "agentdeck" in mcpServers;
+}
+
+async function readJsonIfExistsSafe(filePath: string): Promise<unknown> {
+  await assertSafeStatusFileTarget(filePath);
+  return readJsonIfExists(filePath);
+}
+
+async function assertSafeStatusFileTarget(filePath: string): Promise<void> {
+  await assertNoSymlinkedPathParts(dirname(filePath));
+
+  try {
+    const stats = await lstat(filePath);
+    if (stats.isSymbolicLink()) {
+      throw new Error(`Refusing to inspect symlinked config file: ${filePath}`);
+    }
+
+    if (!stats.isFile()) {
+      throw new Error(`Config path is not a file: ${filePath}`);
+    }
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function assertNoSymlinkedPathParts(path: string): Promise<void> {
+  const root = parse(path).root;
+  const pathParts: string[] = [];
+  let currentPath = path;
+
+  while (currentPath && currentPath !== root && currentPath !== dirname(currentPath)) {
+    pathParts.unshift(currentPath);
+    currentPath = dirname(currentPath);
+  }
+
+  for (const pathPart of pathParts) {
+    try {
+      const stats = await lstat(pathPart);
+      if (stats.isSymbolicLink()) {
+        throw new Error(`Refusing to inspect config in symlinked path: ${pathPart}`);
+      }
+
+      if (!stats.isDirectory()) {
+        throw new Error(`Config parent path is not a directory: ${pathPart}`);
+      }
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw error;
+      }
+    }
+  }
+}
+
+async function fileContains(filePath: string, text: string): Promise<boolean> {
+  try {
+    await assertSafeStatusFileTarget(filePath);
+    return (await readFile(filePath, "utf8")).includes(text);
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function readJsonIfExists(filePath: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8"));
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return undefined;
+    }
+
+    throw new Error(`Unable to read JSON file: ${filePath}`);
+  }
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return isPlainObject(value) ? value : {};
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
 }
 
 function createMcpErrorResult(message: string): McpActionResult {
@@ -467,6 +743,24 @@ async function confirmGlobalInstructionInstall(event: IpcMainInvokeEvent, client
   return result.response === 0;
 }
 
+async function confirmGlobalMcpChange(event: IpcMainInvokeEvent, client: McpClient, action: "install" | "uninstall"): Promise<boolean> {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+  const target = client === "opencode" ? getOpenCodeGlobalConfigPath(app.getPath("home")) : getClaudeUserConfigPath();
+  const verb = action === "install" ? "Install" : "Uninstall";
+  const options = {
+    buttons: [`${verb} Global MCP`, "Cancel"],
+    cancelId: 1,
+    defaultId: 0,
+    detail: `${verb}s the AgentDeck MCP server in user-level ${getMcpClientLabel(client)} configuration. Target: ${target}`,
+    message: `${verb} global AgentDeck MCP for ${getMcpClientLabel(client)}?`,
+    noLink: true,
+    title: `${verb} AgentDeck MCP`,
+    type: "question" as const,
+  };
+  const result = ownerWindow ? await dialog.showMessageBox(ownerWindow, options) : await dialog.showMessageBox(options);
+  return result.response === 0;
+}
+
 function isTrustedSessionOwner(event: IpcMainInvokeEvent, sessionId: string) {
   return isTrustedIpcEvent(event) && sessionOwners.get(sessionId) === event.sender.id;
 }
@@ -486,7 +780,7 @@ function resolveAvailableShell(): ResolvedShell {
 
   const candidates = ["pwsh.exe", "powershell.exe", process.env.ComSpec || "cmd.exe"];
   for (const candidate of candidates) {
-    if (isWindowsCommandAvailable(candidate)) {
+    if (isCommandAvailable(candidate)) {
       return { args: [], file: candidate };
     }
   }
@@ -494,8 +788,12 @@ function resolveAvailableShell(): ResolvedShell {
   return { args: [], file: "cmd.exe" };
 }
 
-function isWindowsCommandAvailable(command: string) {
-  return spawnSync("where.exe", [command], { stdio: "ignore" }).status === 0;
+function isCommandAvailable(command: string) {
+  if (process.platform === "win32") {
+    return spawnSync("where.exe", [command], { stdio: "ignore" }).status === 0;
+  }
+
+  return spawnSync("command", ["-v", command], { shell: true, stdio: "ignore" }).status === 0;
 }
 
 function getSafeShellEnv() {

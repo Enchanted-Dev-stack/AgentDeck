@@ -757,6 +757,46 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
+.integration-notices {
+  display: grid;
+  gap: 10px;
+  max-width: 1080px;
+}
+
+.integration-notice {
+  align-items: center;
+  backdrop-filter: blur(26px);
+  background: rgba(255, 255, 255, 0.76);
+  border: 0;
+  border-radius: 24px;
+  box-shadow: 0 18px 42px rgba(55, 56, 78, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  color: rgba(17, 19, 21, 0.58);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+.integration-notice > div:first-child {
+  min-width: 0;
+}
+
+.integration-notice span {
+  color: rgba(17, 19, 21, 0.72);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.integration-notice p {
+  color: rgba(17, 19, 21, 0.6);
+  font-size: 15px;
+  line-height: 1.32;
+  margin: 6px 0 0;
+}
+
 .resource-card,
 .integration-card,
 .memory-card,
@@ -977,6 +1017,11 @@ button {
     align-items: flex-start;
     flex-direction: column;
     min-height: 0;
+  }
+
+  .integration-notice {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

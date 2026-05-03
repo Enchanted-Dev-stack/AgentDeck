@@ -18,6 +18,7 @@ export const workspaceChannels = {
 export const mcpChannels = {
   copyConfig: "mcp:copy-config",
   copyInstructions: "mcp:copy-instructions",
+  getStatus: "mcp:get-status",
   install: "mcp:install",
   installInstructions: "mcp:install-instructions",
   uninstall: "mcp:uninstall",
@@ -34,6 +35,16 @@ export interface McpActionResult {
   ok: boolean;
   status: "installed" | "manual" | "not_installed" | "cancelled" | "error";
 }
+
+export interface McpClientSetupStatus {
+  configPath?: string | undefined;
+  instructionsInstalled: boolean;
+  instructionsPath?: string | undefined;
+  mcpInstalled: boolean;
+  message?: string | undefined;
+}
+
+export type McpSetupStatus = Record<McpClient, McpClientSetupStatus>;
 
 export interface TerminalCreateRequest {
   cols: number;
@@ -58,6 +69,7 @@ export interface WorkspaceBridge {
 export interface McpBridge {
   copyConfig: (client: McpClient) => Promise<McpActionResult>;
   copyInstructions: (client: McpClient, scope: McpInstructionScope) => Promise<McpActionResult>;
+  getStatus: () => Promise<McpSetupStatus>;
   install: (client: McpClient) => Promise<McpActionResult>;
   installInstructions: (client: McpClient, scope: McpInstructionScope) => Promise<McpActionResult>;
   uninstall: (client: McpClient) => Promise<McpActionResult>;

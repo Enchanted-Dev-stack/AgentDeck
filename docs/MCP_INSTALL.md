@@ -17,7 +17,19 @@ corepack pnpm --filter @agentdeck/core --filter @agentdeck/mcp-server build
 node packages/mcp-server/dist/cli.js --state-file /path/to/agentdeck-state.json
 ```
 
-## Install Into Project Configs
+## Install Locations
+
+The desktop app's default install path is global per user, so agents can use AgentDeck from any project without selecting a folder.
+
+OpenCode global config:
+
+```text
+~/.config/opencode/opencode.json
+```
+
+Claude Code user-scoped MCP config is managed by the Claude Code CLI and stored in `~/.claude.json`.
+
+Project-level install remains useful when a repo should carry a shared team MCP config.
 
 OpenCode project config:
 

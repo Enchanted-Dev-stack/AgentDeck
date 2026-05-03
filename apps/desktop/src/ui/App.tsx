@@ -1,5 +1,5 @@
 import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
-import { getMcpBridge, getTerminalBridge, getWorkspaceBridge, type McpActionResult, type McpClient } from "../terminal/bridge.js";
+import { getMcpBridge, getTerminalBridge, getWorkspaceBridge, type McpActionResult, type McpClient, type McpSetupStatus } from "../terminal/bridge.js";
 import { createWorkspaceDocument } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 import { TerminalEmulator } from "./TerminalEmulator.js";
@@ -72,14 +72,14 @@ const mcpClients: Array<{ id: McpClient; label: string; description: string; con
   {
     id: "opencode",
     label: "OpenCode",
-    description: "Project-level local MCP entry in opencode.json.",
-    configFile: "opencode.json",
+    description: "Global local MCP entry in OpenCode config.",
+    configFile: "~/.config/opencode/opencode.json",
   },
   {
     id: "claude-code",
     label: "Claude Code",
-    description: "Project-scoped stdio MCP entry in .mcp.json.",
-    configFile: ".mcp.json",
+    description: "User-scoped stdio MCP entry available across Claude Code projects.",
+    configFile: "~/.claude.json",
   },
 ];
 
@@ -151,14 +151,18 @@ export function App() {
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [selectedTerminalIds, setSelectedTerminalIds] = useState<Set<string>>(new Set());
   const [mcpMessages, setMcpMessages] = useState<Record<McpClient, string>>({
-    "claude-code": "Choose a project folder to install or repair Claude Code MCP config.",
-    opencode: "Choose a project folder to install or repair OpenCode MCP config.",
+    "claude-code": "Install AgentDeck MCP globally for Claude Code, then add instructions so it knows when to use shared context.",
+    opencode: "Install AgentDeck MCP globally for OpenCode, then add instructions so it knows when to use shared context.",
   });
+  const [mcpSetupStatus, setMcpSetupStatus] = useState<McpSetupStatus | null>(null);
   const [pendingMcpClients, setPendingMcpClients] = useState<Record<McpClient, boolean>>({
     "claude-code": false,
     opencode: false,
   });
   const [workspaceName, setWorkspaceName] = useState("AgentDeck Workspace");
+  const [dismissedInstructionPrompts, setDismissedInstructionPrompts] = useState<Set<McpClient>>(new Set());
+  const [instructionPromptClient, setInstructionPromptClient] = useState<McpClient | null>(null);
+  const mcpStatusRequestId = useRef(0);
   const [terminalState, setTerminalState] = useState({
     activeTabId: "tab-1",
     nextTabIndex: 2,
@@ -166,6 +170,31 @@ export function App() {
     tabs: initialTerminalTabs,
   });
   const activeTab = terminalState.tabs.find((tab) => tab.id === terminalState.activeTabId) ?? terminalState.tabs[0] ?? createTerminalTab("tab-1", 1, 1);
+
+  useEffect(() => {
+    void refreshMcpStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!mcpSetupStatus) {
+      return;
+    }
+
+    setDismissedInstructionPrompts((current) => {
+      let changed = false;
+      const next = new Set<McpClient>();
+      for (const client of current) {
+        const status = mcpSetupStatus[client];
+        if (status?.mcpInstalled && !status.instructionsInstalled) {
+          next.add(client);
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [mcpSetupStatus]);
 
   function addTerminal(targetId: string | undefined, side: TerminalSide = "right") {
     addTerminalToSide(targetId ? [targetId] : [], side);
@@ -373,6 +402,26 @@ export function App() {
     setActivePage("terminal");
   }
 
+  async function refreshMcpStatus() {
+    const bridge = getMcpBridge();
+    if (!bridge) {
+      return null;
+    }
+
+    try {
+      const requestId = ++mcpStatusRequestId.current;
+      const status = await bridge.getStatus();
+      if (requestId !== mcpStatusRequestId.current) {
+        return null;
+      }
+
+      setMcpSetupStatus(status);
+      return status;
+    } catch {
+      return null;
+    }
+  }
+
   async function runMcpAction(client: McpClient, action: McpUiAction) {
     const bridge = getMcpBridge();
     if (!bridge) {
@@ -384,13 +433,28 @@ export function App() {
 
     try {
       const result = await runMcpBridgeAction(bridge, client, action);
-      const message = action === "install" && result.ok ? `${formatMcpResult(result)} Instructions recommended: install AgentDeck instructions so this agent knows when to read shared docs, todos, notes, and memory.` : formatMcpResult(result);
+      if (action === "install-global-instructions" && result.ok) {
+        setInstructionPromptClient(null);
+      }
+
+      const status = await refreshMcpStatus();
+      const clientStatus = status?.[client];
+      const needsInstructions = clientStatus ? !clientStatus.instructionsInstalled : false;
+      const message = action === "install" && result.ok && needsInstructions ? `${formatMcpResult(result)} Instructions recommended: install AgentDeck instructions so this agent knows when to read shared docs, todos, notes, and memory.` : formatMcpResult(result);
       setMcpMessages((messages) => ({ ...messages, [client]: message }));
+      if (action === "install" && result.ok && needsInstructions) {
+        setInstructionPromptClient(client);
+      }
     } catch (error) {
       setMcpMessages((messages) => ({ ...messages, [client]: error instanceof Error ? error.message : "MCP action failed." }));
     } finally {
       setPendingMcpClients((clients) => ({ ...clients, [client]: false }));
     }
+  }
+
+  function dismissInstructionPrompt(client: McpClient) {
+    setDismissedInstructionPrompts((current) => new Set(current).add(client));
+    setInstructionPromptClient(null);
   }
 
   function updateLayout(layout: SplitNode) {
@@ -492,8 +556,9 @@ export function App() {
             })}
           </div>
         </section>
-        {activePage !== "terminal" ? <ResourcePage mcpMessages={mcpMessages} onMcpAction={runMcpAction} page={activePage} pendingMcpClients={pendingMcpClients} /> : null}
+        {activePage !== "terminal" ? <ResourcePage dismissedInstructionPrompts={dismissedInstructionPrompts} mcpMessages={mcpMessages} mcpSetupStatus={mcpSetupStatus} onDismissInstructionPrompt={dismissInstructionPrompt} onMcpAction={runMcpAction} page={activePage} pendingMcpClients={pendingMcpClients} /> : null}
       </section>
+      {instructionPromptClient ? <InstructionPrompt client={instructionPromptClient} onDismiss={() => dismissInstructionPrompt(instructionPromptClient)} onInstall={() => runMcpAction(instructionPromptClient, "install-global-instructions")} /> : null}
       {renameDialog ? <RenameDialog dialog={renameDialog} onCancel={() => setRenameDialog(null)} onChange={updateRenameValue} onSubmit={submitRename} /> : null}
     </main>
   );
@@ -1253,7 +1318,7 @@ function getSubtreeMinPixels(node: SplitNode | undefined, dimension: "width" | "
   return Math.max(...node.children.map((child) => getSubtreeMinPixels(child, dimension)));
 }
 
-function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { mcpMessages: Record<McpClient, string>; onMcpAction: (client: McpClient, action: McpUiAction) => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean> }) {
+function ResourcePage({ dismissedInstructionPrompts, mcpMessages, mcpSetupStatus, onDismissInstructionPrompt, onMcpAction, page, pendingMcpClients }: { dismissedInstructionPrompts: Set<McpClient>; mcpMessages: Record<McpClient, string>; mcpSetupStatus: McpSetupStatus | null; onDismissInstructionPrompt: (client: McpClient) => void; onMcpAction: (client: McpClient, action: McpUiAction) => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean> }) {
   if (page === "docs") {
     return (
       <section className="resource-page" aria-label="Docs">
@@ -1298,7 +1363,8 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
   if (page === "integrations") {
     return (
       <section className="resource-page" aria-label="MCP Integrations">
-        <ResourceHeader eyebrow="Agent Wiring" icon="server" label="MCP Integrations" description="Install AgentDeck's local stdio MCP into project-level agent configs so OpenCode and Claude Code can discover shared context tools." />
+        <ResourceHeader eyebrow="Agent Wiring" icon="server" label="MCP Integrations" description="Install AgentDeck's local stdio MCP globally, then add instructions so agents know when to use shared context tools." />
+        <InstructionNoticeList dismissedInstructionPrompts={dismissedInstructionPrompts} mcpSetupStatus={mcpSetupStatus} onDismiss={onDismissInstructionPrompt} onInstall={(client) => onMcpAction(client, "install-global-instructions")} pendingMcpClients={pendingMcpClients} />
         <div className="integration-grid">
           {mcpClients.map((client) => (
             <article className="integration-card" key={client.id}>
@@ -1312,10 +1378,10 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
               </div>
               <div className="integration-card__actions">
                 <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "install")} type="button">
-                  Install
+                  Install Global MCP
                 </button>
                 <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "install")} type="button">
-                  Repair
+                  Repair Global MCP
                 </button>
                 <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "uninstall")} type="button">
                   Uninstall
@@ -1359,6 +1425,55 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
       </div>
     </section>
   );
+}
+
+function InstructionNoticeList({ dismissedInstructionPrompts, mcpSetupStatus, onDismiss, onInstall, pendingMcpClients }: { dismissedInstructionPrompts: Set<McpClient>; mcpSetupStatus: McpSetupStatus | null; onDismiss: (client: McpClient) => void; onInstall: (client: McpClient) => void; pendingMcpClients: Record<McpClient, boolean> }) {
+  const clientsNeedingInstructions = mcpClients.filter((client) => {
+    const status = mcpSetupStatus?.[client.id];
+    return status?.mcpInstalled && !status.instructionsInstalled && !dismissedInstructionPrompts.has(client.id);
+  });
+
+  if (clientsNeedingInstructions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="integration-notices" aria-label="MCP setup notifications">
+      {clientsNeedingInstructions.map((client) => (
+        <article className="integration-notice" key={client.id}>
+          <div>
+            <span>Instructions recommended</span>
+            <p>{client.label} can connect to AgentDeck MCP, but instructions are missing. Install them so it automatically checks shared docs, todos, notes, and memory.</p>
+          </div>
+          <div className="integration-card__actions">
+            <button disabled={pendingMcpClients[client.id]} onClick={() => onInstall(client.id)} type="button">Install Instructions</button>
+            <button disabled={pendingMcpClients[client.id]} onClick={() => onDismiss(client.id)} type="button">Not Now</button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function InstructionPrompt({ client, onDismiss, onInstall }: { client: McpClient; onDismiss: () => void; onInstall: () => void }) {
+  const label = getMcpClientLabel(client);
+  return (
+    <div className="rename-dialog-backdrop" role="presentation">
+      <section aria-label="AgentDeck instruction recommendation" aria-modal="true" className="rename-dialog" role="dialog">
+        <h2>AgentDeck MCP is installed</h2>
+        <p>{label} can now connect to AgentDeck, but it needs instructions to know when to use shared docs, todos, notes, and memory automatically.</p>
+        <p>Install instructions unless you plan to manually tell the agent to use AgentDeck MCP each session.</p>
+        <div className="rename-dialog__actions">
+          <button onClick={onDismiss} type="button">Not Now</button>
+          <button onClick={onInstall} type="button">Install Instructions</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function getMcpClientLabel(client: McpClient) {
+  return mcpClients.find((item) => item.id === client)?.label ?? client;
 }
 
 function ResourceHeader({ description, eyebrow, icon, label }: { description: string; eyebrow: string; icon: AgentDeckIconName; label: string }) {
