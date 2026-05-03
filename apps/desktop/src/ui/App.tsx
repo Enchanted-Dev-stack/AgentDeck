@@ -1457,15 +1457,31 @@ function InstructionNoticeList({ dismissedInstructionPrompts, mcpSetupStatus, on
 
 function InstructionPrompt({ client, onDismiss, onInstall }: { client: McpClient; onDismiss: () => void; onInstall: () => void }) {
   const label = getMcpClientLabel(client);
+  const installButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    installButtonRef.current?.focus();
+  }, []);
+
   return (
-    <div className="rename-dialog-backdrop" role="presentation">
-      <section aria-label="AgentDeck instruction recommendation" aria-modal="true" className="rename-dialog" role="dialog">
-        <h2>AgentDeck MCP is installed</h2>
-        <p>{label} can now connect to AgentDeck, but it needs instructions to know when to use shared docs, todos, notes, and memory automatically.</p>
-        <p>Install instructions unless you plan to manually tell the agent to use AgentDeck MCP each session.</p>
-        <div className="rename-dialog__actions">
-          <button onClick={onDismiss} type="button">Not Now</button>
-          <button onClick={onInstall} type="button">Install Instructions</button>
+    <div className="instruction-dialog-backdrop" role="presentation">
+      <section aria-label="AgentDeck instruction recommendation" aria-modal="true" className="instruction-dialog" role="dialog">
+        <div className="instruction-dialog__header">
+          <div className="instruction-dialog__icon" aria-hidden="true">
+            <AgentDeckIcon name="server" size={20} />
+          </div>
+          <div>
+            <span className="instruction-dialog__eyebrow">Instructions Recommended</span>
+            <h2 className="instruction-dialog__title">AgentDeck MCP is installed</h2>
+          </div>
+        </div>
+        <div className="instruction-dialog__body">
+          <p className="instruction-dialog__copy">{label} can now connect to AgentDeck, but it needs instructions to know when to use shared docs, todos, notes, and memory automatically.</p>
+          <p className="instruction-dialog__copy">Install instructions unless you plan to manually tell the agent to use AgentDeck MCP each session.</p>
+        </div>
+        <div className="instruction-dialog__actions">
+          <button className="instruction-dialog__button instruction-dialog__button--secondary" onClick={onDismiss} type="button">Not Now</button>
+          <button className="instruction-dialog__button instruction-dialog__button--primary" onClick={onInstall} ref={installButtonRef} type="button">Install Instructions</button>
         </div>
       </section>
     </div>

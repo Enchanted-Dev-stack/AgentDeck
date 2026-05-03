@@ -352,6 +352,124 @@ button {
   outline: none;
 }
 
+.instruction-dialog-backdrop {
+  align-items: center;
+  backdrop-filter: blur(18px);
+  background: rgba(17, 19, 21, 0.36);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 40;
+}
+
+.instruction-dialog {
+  background: rgba(255, 255, 255, 0.96);
+  border: 0;
+  border-radius: 30px;
+  box-shadow: 0 28px 80px rgba(55, 56, 78, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  color: #111315;
+  display: grid;
+  font-family: var(--font-display);
+  gap: 22px;
+  max-height: calc(100vh - 40px);
+  max-width: min(620px, calc(100vw - 40px));
+  min-width: min(440px, calc(100vw - 40px));
+  overflow: auto;
+  padding: 22px;
+}
+
+.instruction-dialog__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+}
+
+.instruction-dialog__icon {
+  align-items: center;
+  background: rgba(17, 19, 21, 0.06);
+  border-radius: 18px;
+  color: #111315;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.instruction-dialog__eyebrow {
+  color: rgba(17, 19, 21, 0.58);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.instruction-dialog__title {
+  color: #111315;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 0.96;
+  margin: 7px 0 0;
+}
+
+.instruction-dialog__body {
+  display: grid;
+  gap: 10px;
+}
+
+.instruction-dialog__copy {
+  color: rgba(17, 19, 21, 0.62);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.instruction-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.instruction-dialog__button {
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  height: 38px;
+  padding: 0 16px;
+}
+
+.instruction-dialog__button--primary,
+.instruction-dialog__button--secondary {
+  background: rgba(17, 19, 21, 0.94);
+  color: #ffffff;
+}
+
+.instruction-dialog__button:hover,
+.instruction-dialog__button:focus-visible {
+  background: #000000;
+  color: #ffffff;
+}
+
+.instruction-dialog__button:focus-visible {
+  box-shadow: 0 0 0 4px rgba(17, 19, 21, 0.12);
+  outline: 2px solid rgba(17, 19, 21, 0.7);
+  outline-offset: 2px;
+}
+
+.instruction-dialog__button:hover {
+  outline: none;
+}
+
 .terminal-workspace {
   background: var(--surface);
   height: 100%;
@@ -1022,6 +1140,24 @@ button {
   .integration-notice {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .instruction-dialog {
+    gap: 18px;
+    min-width: 0;
+    padding: 18px;
+  }
+
+  .instruction-dialog__title {
+    font-size: 28px;
+  }
+
+  .instruction-dialog__copy {
+    font-size: 16px;
+  }
+
+  .instruction-dialog__actions {
+    justify-content: flex-start;
   }
 }
 

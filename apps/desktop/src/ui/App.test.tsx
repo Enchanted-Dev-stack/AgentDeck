@@ -415,7 +415,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
     await user.click(screen.getAllByRole("button", { name: "Install Global MCP" })[0]!);
     const dialog = await screen.findByRole("dialog", { name: "AgentDeck instruction recommendation" });
-    expect(container.querySelector(".rename-dialog-backdrop")).toBeTruthy();
+    expect(container.querySelector(".instruction-dialog-backdrop")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog as HTMLElement).getByRole("button", { name: "Install Instructions" })));
     await user.click(within(dialog as HTMLElement).getByRole("button", { name: "Install Instructions" }));
     await waitFor(() => expect(installInstructions).toHaveBeenCalledWith("opencode", "global"));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "AgentDeck instruction recommendation" })).toBeNull());
