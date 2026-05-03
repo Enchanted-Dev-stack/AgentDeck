@@ -72,6 +72,32 @@ This creates or updates `/path/to/project/.mcp.json`:
 - Other MCP servers and unrelated settings are preserved.
 - Config files must be valid JSON for automatic installation. If a client config uses JSONC comments, use `print-config` and merge manually.
 
+## Agent Instructions
+
+MCP config makes the `agentdeck` server available. Agent instructions tell coding agents when to use it for shared docs, todos, notes, and memory.
+
+AgentDeck supports two instruction scopes:
+
+- Global instructions: generic user-level behavior for any project where AgentDeck MCP is configured.
+- Repository instructions: project-level behavior that can be shared with a repo.
+
+Claude Code global instructions are installed into `~/.claude/CLAUDE.md` with a managed AgentDeck block.
+
+OpenCode global instructions create `~/.config/agentdeck/AGENTDECK.md` and add that file to `~/.config/opencode/opencode.json` through the `instructions` array.
+
+Repository instructions write a managed AgentDeck block to:
+
+- OpenCode: `AGENTS.md`
+- Claude Code: `CLAUDE.md`
+
+Instruction installers preserve existing content, create backups before changing existing files, and only replace the managed block between:
+
+```md
+<!-- agentdeck:start -->
+...
+<!-- agentdeck:end -->
+```
+
 ## Manual Snippets
 
 Print a client-specific snippet without writing files:

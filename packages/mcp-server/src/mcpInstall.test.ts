@@ -4,8 +4,12 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   buildAgentDeckServerSpec,
+  createMcpInstructions,
   getClientConfigPath,
+  getMcpInstructionsPath,
+  getOpenCodeGlobalConfigPath,
   installMcpConfig,
+  installMcpInstructions,
   removeMcpConfig,
   patchMcpConfig,
   uninstallMcpConfig,
@@ -286,6 +290,55 @@ describe("MCP client installers", () => {
     ).rejects.toThrow(/symlink/i);
   });
 
+  test("rejects config files under symlinked ancestor directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agentdeck-symlink-ancestor-"));
+    const realRoot = join(root, "real-root");
+    const linkedRoot = join(root, "linked-root");
+    await mkdir(join(realRoot, "project"), { recursive: true });
+
+    try {
+      await symlink(realRoot, linkedRoot, "dir");
+    } catch (error) {
+      if (isWindowsPrivilegeError(error)) {
+        return;
+      }
+
+      throw error;
+    }
+
+    await expect(
+      installMcpConfig({
+        client: "opencode",
+        configPath: join(linkedRoot, "project", "opencode.json"),
+        server: buildAgentDeckServerSpec({
+          command: "agentdeck-mcp",
+          stateFilePath: join(root, "state.json"),
+        }),
+      }),
+    ).rejects.toThrow(/symlink/i);
+  });
+
+  test("preserves existing OpenCode global instruction content with a managed block", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "agentdeck-opencode-instruction-preserve-"));
+    const instructionPath = getMcpInstructionsPath({
+      client: "opencode",
+      homeDir,
+      scope: "global",
+    });
+    await mkdir(join(homeDir, ".config", "agentdeck"), { recursive: true });
+    await writeFile(instructionPath, "# Personal Agent Notes\n\nKeep this line.\n", "utf8");
+
+    await installMcpInstructions({
+      client: "opencode",
+      homeDir,
+      scope: "global",
+    });
+
+    const nextContent = await readFile(instructionPath, "utf8");
+    expect(nextContent).toContain("Keep this line.");
+    expect(nextContent).toContain("<!-- agentdeck:start -->");
+  });
+
   test("returns project-level config paths", () => {
     expect(
       getClientConfigPath("opencode", "D:/project").replace(/\\/g, "/"),
@@ -293,6 +346,86 @@ describe("MCP client installers", () => {
     expect(
       getClientConfigPath("claude-code", "D:/project").replace(/\\/g, "/"),
     ).toBe("D:/project/.mcp.json");
+  });
+
+  test("creates repository instructions with a managed AgentDeck block", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agentdeck-instructions-repo-"));
+    const instructionsPath = join(root, "AGENTS.md");
+    await writeFile(instructionsPath, "# Existing Rules\n\n- Keep this.\n", "utf8");
+
+    const first = await installMcpInstructions({
+      backupSuffix: "repo.bak",
+      client: "opencode",
+      homeDir: root,
+      projectRoot: root,
+      scope: "repo",
+    });
+    const second = await installMcpInstructions({
+      backupSuffix: "repo2.bak",
+      client: "opencode",
+      homeDir: root,
+      projectRoot: root,
+      scope: "repo",
+    });
+
+    expect(first.changed).toBe(true);
+    expect(first.backupPaths).toEqual([`${instructionsPath}.repo.bak`]);
+    expect(second.changed).toBe(false);
+    await expect(readFile(instructionsPath, "utf8")).resolves.toContain("<!-- agentdeck:start -->");
+    await expect(readFile(instructionsPath, "utf8")).resolves.toContain("- Keep this.");
+    await expect(readFile(`${instructionsPath}.repo.bak`, "utf8")).resolves.toBe("# Existing Rules\n\n- Keep this.\n");
+  });
+
+  test("installs Claude Code global instructions in user CLAUDE.md", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "agentdeck-claude-global-"));
+    const result = await installMcpInstructions({
+      client: "claude-code",
+      homeDir,
+      scope: "global",
+    });
+
+    const instructionsPath = getMcpInstructionsPath({
+      client: "claude-code",
+      homeDir,
+      scope: "global",
+    });
+    expect(result.paths).toEqual([instructionsPath]);
+    await expect(readFile(instructionsPath, "utf8")).resolves.toContain("For Claude Code, use the AgentDeck MCP server");
+  });
+
+  test("installs OpenCode global instructions and preserves existing global config", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "agentdeck-opencode-global-"));
+    const configPath = getOpenCodeGlobalConfigPath(homeDir);
+    await mkdir(join(homeDir, ".config", "opencode"), { recursive: true });
+    await writeJson(configPath, {
+      model: "anthropic/claude-sonnet-4-5",
+      instructions: ["CONTRIBUTING.md"],
+    });
+
+    const result = await installMcpInstructions({
+      backupSuffix: "global.bak",
+      client: "opencode",
+      homeDir,
+      scope: "global",
+    });
+    const instructionPath = getMcpInstructionsPath({
+      client: "opencode",
+      homeDir,
+      scope: "global",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.backupPaths).toEqual([`${configPath}.global.bak`]);
+    await expect(readFile(instructionPath, "utf8")).resolves.toContain("For OpenCode, use the AgentDeck MCP server");
+    await expect(readJson(configPath)).resolves.toMatchObject({
+      model: "anthropic/claude-sonnet-4-5",
+      instructions: ["CONTRIBUTING.md", instructionPath],
+    });
+  });
+
+  test("copies generated instruction text without filesystem access", () => {
+    expect(createMcpInstructions("opencode", "global")).toContain("At the start of a work session");
+    expect(createMcpInstructions("claude-code", "repo")).toContain("This repository uses AgentDeck MCP");
   });
 });
 

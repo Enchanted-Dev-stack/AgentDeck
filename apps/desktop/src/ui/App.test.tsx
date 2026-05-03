@@ -341,13 +341,15 @@ describe("App", () => {
     const install = vi.fn(() => Promise.resolve({ changed: true, ok: true, message: "Installed AgentDeck MCP config", status: "installed" as const }));
     const uninstall = vi.fn(() => Promise.resolve({ changed: true, ok: true, message: "Uninstalled AgentDeck MCP config", status: "not_installed" as const }));
     const copyConfig = vi.fn(() => Promise.resolve({ changed: false, ok: true, message: "Copied config", status: "manual" as const }));
-    window.agentDeck = createFakeBridge({ mcp: { copyConfig, install, uninstall } });
+    const copyInstructions = vi.fn(() => Promise.resolve({ changed: false, ok: true, message: "Copied instructions", status: "manual" as const }));
+    const installInstructions = vi.fn(() => Promise.resolve({ changed: true, ok: true, message: "Installed instructions", status: "installed" as const }));
+    window.agentDeck = createFakeBridge({ mcp: { copyConfig, copyInstructions, install, installInstructions, uninstall } });
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "MCP Integrations" }));
     await user.click(screen.getAllByRole("button", { name: "Install" })[0]!);
     await waitFor(() => expect(install).toHaveBeenCalledWith("opencode"));
-    expect(screen.getByText("Installed AgentDeck MCP config")).toBeTruthy();
+    expect(screen.getByText(/Installed AgentDeck MCP config/)).toBeTruthy();
 
     await user.click(screen.getAllByRole("button", { name: "Copy Config" })[0]!);
     await waitFor(() => expect(copyConfig).toHaveBeenCalledWith("opencode"));
@@ -356,6 +358,16 @@ describe("App", () => {
     await user.click(screen.getAllByRole("button", { name: "Uninstall" })[0]!);
     await waitFor(() => expect(uninstall).toHaveBeenCalledWith("opencode"));
     expect(screen.getByText("Uninstalled AgentDeck MCP config")).toBeTruthy();
+
+    await user.click(screen.getAllByRole("button", { name: "Install Global Instructions" })[0]!);
+    await waitFor(() => expect(installInstructions).toHaveBeenCalledWith("opencode", "global"));
+    expect(screen.getByText("Installed instructions")).toBeTruthy();
+
+    await user.click(screen.getAllByRole("button", { name: "Generate Repo Instructions" })[0]!);
+    await waitFor(() => expect(installInstructions).toHaveBeenCalledWith("opencode", "repo"));
+
+    await user.click(screen.getAllByRole("button", { name: "Copy Instructions" })[0]!);
+    await waitFor(() => expect(copyInstructions).toHaveBeenCalledWith("opencode", "global"));
   });
 
   test("tracks pending MCP actions independently per client", async () => {
@@ -370,7 +382,9 @@ describe("App", () => {
     window.agentDeck = createFakeBridge({
       mcp: {
         copyConfig: () => Promise.resolve({ changed: false, ok: true, message: "Copied config", status: "manual" as const }),
+        copyInstructions: () => Promise.resolve({ changed: false, ok: true, message: "Copied instructions", status: "manual" as const }),
         install,
+        installInstructions: () => Promise.resolve({ changed: true, ok: true, message: "Installed instructions", status: "installed" as const }),
         uninstall: () => Promise.resolve({ changed: true, ok: true, message: "Uninstalled", status: "not_installed" as const }),
       },
     });
@@ -393,10 +407,12 @@ describe("App", () => {
     expect((within(opencodeCard as HTMLElement).getByRole("button", { name: "Repair" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(opencodeCard as HTMLElement).getByRole("button", { name: "Uninstall" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(opencodeCard as HTMLElement).getByRole("button", { name: "Copy Config" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(opencodeCard as HTMLElement).getByRole("button", { name: "Install Global Instructions" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(claudeCard as HTMLElement).getByRole("button", { name: "Install" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(claudeCard as HTMLElement).getByRole("button", { name: "Repair" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(claudeCard as HTMLElement).getByRole("button", { name: "Uninstall" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(claudeCard as HTMLElement).getByRole("button", { name: "Copy Config" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(claudeCard as HTMLElement).getByRole("button", { name: "Install Global Instructions" }) as HTMLButtonElement).disabled).toBe(true);
 
     resolveInstallByClient.opencode?.({ changed: true, ok: true, message: "Installed", status: "installed" });
     await waitFor(() => expect((within(opencodeCard as HTMLElement).getByRole("button", { name: "Install" }) as HTMLButtonElement).disabled).toBe(false));
@@ -439,7 +455,9 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
   return {
     mcp: mcp ?? {
       copyConfig: () => Promise.resolve({ changed: false, ok: true, message: "Copied config", status: "manual" }),
+      copyInstructions: () => Promise.resolve({ changed: false, ok: true, message: "Copied instructions", status: "manual" }),
       install: () => Promise.resolve({ changed: true, ok: true, message: "Installed", status: "installed" }),
+      installInstructions: () => Promise.resolve({ changed: true, ok: true, message: "Installed instructions", status: "installed" }),
       uninstall: () => Promise.resolve({ changed: true, ok: true, message: "Uninstalled", status: "not_installed" }),
     },
     terminal: {

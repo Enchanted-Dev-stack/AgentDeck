@@ -17,11 +17,14 @@ export const workspaceChannels = {
 
 export const mcpChannels = {
   copyConfig: "mcp:copy-config",
+  copyInstructions: "mcp:copy-instructions",
   install: "mcp:install",
+  installInstructions: "mcp:install-instructions",
   uninstall: "mcp:uninstall",
 } as const;
 
 export type McpClient = "opencode" | "claude-code";
+export type McpInstructionScope = "global" | "repo";
 
 export interface McpActionResult {
   backupPath?: string | undefined;
@@ -54,7 +57,9 @@ export interface WorkspaceBridge {
 
 export interface McpBridge {
   copyConfig: (client: McpClient) => Promise<McpActionResult>;
+  copyInstructions: (client: McpClient, scope: McpInstructionScope) => Promise<McpActionResult>;
   install: (client: McpClient) => Promise<McpActionResult>;
+  installInstructions: (client: McpClient, scope: McpInstructionScope) => Promise<McpActionResult>;
   uninstall: (client: McpClient) => Promise<McpActionResult>;
 }
 

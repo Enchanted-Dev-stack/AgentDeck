@@ -1,12 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { mcpChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type McpActionResult, type McpClient, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { mcpChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type McpActionResult, type McpClient, type McpInstructionScope, type TerminalCreateRequest } from "../terminal/bridge.js";
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
 import type { WorkspaceDocument } from "../workspace/schema.js";
 
 const bridge: AgentDeckBridge = {
   mcp: {
     copyConfig: (client: McpClient) => ipcRenderer.invoke(mcpChannels.copyConfig, client) as Promise<McpActionResult>,
+    copyInstructions: (client: McpClient, scope: McpInstructionScope) => ipcRenderer.invoke(mcpChannels.copyInstructions, client, scope) as Promise<McpActionResult>,
     install: (client: McpClient) => ipcRenderer.invoke(mcpChannels.install, client) as Promise<McpActionResult>,
+    installInstructions: (client: McpClient, scope: McpInstructionScope) => ipcRenderer.invoke(mcpChannels.installInstructions, client, scope) as Promise<McpActionResult>,
     uninstall: (client: McpClient) => ipcRenderer.invoke(mcpChannels.uninstall, client) as Promise<McpActionResult>,
   },
   terminal: {

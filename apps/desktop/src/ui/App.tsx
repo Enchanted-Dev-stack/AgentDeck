@@ -5,6 +5,7 @@ import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 import { TerminalEmulator } from "./TerminalEmulator.js";
 
 type Page = "terminal" | "docs" | "todos" | "memory" | "integrations";
+type McpUiAction = "copy" | "copy-global-instructions" | "install" | "install-global-instructions" | "install-repo-instructions" | "uninstall";
 type SplitDirection = "row" | "column";
 type TerminalSide = "left" | "right" | "top" | "bottom";
 type SplitNode = TerminalNode | SplitGroup;
@@ -372,7 +373,7 @@ export function App() {
     setActivePage("terminal");
   }
 
-  async function runMcpAction(client: McpClient, action: "copy" | "install" | "uninstall") {
+  async function runMcpAction(client: McpClient, action: McpUiAction) {
     const bridge = getMcpBridge();
     if (!bridge) {
       setMcpMessages((messages) => ({ ...messages, [client]: "AgentDeck MCP installer is available only in the Electron desktop app." }));
@@ -383,7 +384,8 @@ export function App() {
 
     try {
       const result = await runMcpBridgeAction(bridge, client, action);
-      setMcpMessages((messages) => ({ ...messages, [client]: formatMcpResult(result) }));
+      const message = action === "install" && result.ok ? `${formatMcpResult(result)} Instructions recommended: install AgentDeck instructions so this agent knows when to read shared docs, todos, notes, and memory.` : formatMcpResult(result);
+      setMcpMessages((messages) => ({ ...messages, [client]: message }));
     } catch (error) {
       setMcpMessages((messages) => ({ ...messages, [client]: error instanceof Error ? error.message : "MCP action failed." }));
     } finally {
@@ -497,12 +499,18 @@ export function App() {
   );
 }
 
-async function runMcpBridgeAction(bridge: NonNullable<ReturnType<typeof getMcpBridge>>, client: McpClient, action: "copy" | "install" | "uninstall") {
+async function runMcpBridgeAction(bridge: NonNullable<ReturnType<typeof getMcpBridge>>, client: McpClient, action: McpUiAction) {
   switch (action) {
     case "copy":
       return bridge.copyConfig(client);
+    case "copy-global-instructions":
+      return bridge.copyInstructions(client, "global");
     case "install":
       return bridge.install(client);
+    case "install-global-instructions":
+      return bridge.installInstructions(client, "global");
+    case "install-repo-instructions":
+      return bridge.installInstructions(client, "repo");
     case "uninstall":
       return bridge.uninstall(client);
   }
@@ -1245,7 +1253,7 @@ function getSubtreeMinPixels(node: SplitNode | undefined, dimension: "width" | "
   return Math.max(...node.children.map((child) => getSubtreeMinPixels(child, dimension)));
 }
 
-function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { mcpMessages: Record<McpClient, string>; onMcpAction: (client: McpClient, action: "copy" | "install" | "uninstall") => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean> }) {
+function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { mcpMessages: Record<McpClient, string>; onMcpAction: (client: McpClient, action: McpUiAction) => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean> }) {
   if (page === "docs") {
     return (
       <section className="resource-page" aria-label="Docs">
@@ -1314,6 +1322,15 @@ function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { m
                 </button>
                 <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "copy")} type="button">
                   Copy Config
+                </button>
+                <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "install-global-instructions")} type="button">
+                  Install Global Instructions
+                </button>
+                <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "install-repo-instructions")} type="button">
+                  Generate Repo Instructions
+                </button>
+                <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "copy-global-instructions")} type="button">
+                  Copy Instructions
                 </button>
               </div>
               <p className="integration-card__status" role="status">

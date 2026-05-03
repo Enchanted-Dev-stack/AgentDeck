@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildAgentDeckServerSpec, createManualConfigSnippet, getClientConfigPath, installMcpConfig, removeMcpConfig, type McpClient } from "@agentdeck/mcp-server";
+import { buildAgentDeckServerSpec, createManualConfigSnippet, createMcpInstructions, getClientConfigPath, installMcpConfig, installMcpInstructions, removeMcpConfig, type McpClient, type McpInstructionScope } from "@agentdeck/mcp-server";
 import * as pty from "node-pty";
 import { resolveDefaultShell, TerminalSessionHost, type PtyAdapter, type ResolvedShell, type TerminalSpawnOptions } from "@agentdeck/terminal";
 import { mcpChannels, terminalChannels, workspaceChannels, type McpActionResult, type TerminalCreateRequest } from "../terminal/bridge.js";
@@ -241,6 +241,78 @@ function registerMcpIpc() {
     }
   });
 
+  ipcMain.handle(mcpChannels.copyInstructions, (event, clientPayload: unknown, scopePayload: unknown): McpActionResult => {
+    if (!isTrustedIpcEvent(event)) {
+      return createMcpErrorResult("Unable to copy MCP instructions from an untrusted renderer.");
+    }
+
+    const client = parseMcpClient(clientPayload);
+    const scope = parseMcpInstructionScope(scopePayload);
+    if (!client || !scope) {
+      return createMcpErrorResult("Unknown MCP instruction target.");
+    }
+
+    try {
+      clipboard.writeText(createMcpInstructions(client, scope));
+      return {
+        changed: false,
+        message: `${getMcpClientLabel(client)} ${scope} instructions copied to clipboard.`,
+        ok: true,
+        status: "manual",
+      };
+    } catch (error) {
+      console.error("Failed to copy MCP instructions", error);
+      return createMcpErrorResult(error instanceof Error ? error.message : "Failed to copy MCP instructions.");
+    }
+  });
+
+  ipcMain.handle(mcpChannels.installInstructions, async (event, clientPayload: unknown, scopePayload: unknown): Promise<McpActionResult> => {
+    if (!isTrustedIpcEvent(event)) {
+      return createMcpErrorResult("Unable to install MCP instructions from an untrusted renderer.");
+    }
+
+    const client = parseMcpClient(clientPayload);
+    const scope = parseMcpInstructionScope(scopePayload);
+    if (!client || !scope) {
+      return createMcpErrorResult("Unknown MCP instruction target.");
+    }
+
+    const projectRoot = scope === "repo" ? await selectMcpProjectRoot(event, `Install AgentDeck instructions for ${getMcpClientLabel(client)}`) : undefined;
+    if (scope === "repo" && !projectRoot) {
+      return {
+        changed: false,
+        message: "MCP instruction install cancelled.",
+        ok: false,
+        status: "cancelled",
+      };
+    }
+
+    if (scope === "global" && !(await confirmGlobalInstructionInstall(event, client))) {
+      return {
+        changed: false,
+        message: "MCP instruction install cancelled.",
+        ok: false,
+        status: "cancelled",
+      };
+    }
+
+    try {
+      const result = await installMcpInstructions({ client, homeDir: app.getPath("home"), projectRoot, scope });
+      const target = scope === "global" ? "global" : "repository";
+      return {
+        backupPath: result.backupPaths[0],
+        changed: result.changed,
+        configPath: result.paths.join(", "),
+        message: result.changed ? `${getMcpClientLabel(client)} ${target} instructions installed.` : `${getMcpClientLabel(client)} ${target} instructions are already installed.`,
+        ok: true,
+        status: "installed",
+      };
+    } catch (error) {
+      console.error("Failed to install MCP instructions", error);
+      return createMcpErrorResult(error instanceof Error ? error.message : "Failed to install MCP instructions.");
+    }
+  });
+
   ipcMain.handle(mcpChannels.uninstall, async (event, clientPayload: unknown): Promise<McpActionResult> => {
     if (!isTrustedIpcEvent(event)) {
       return createMcpErrorResult("Unable to uninstall MCP config from an untrusted renderer.");
@@ -321,6 +393,10 @@ function parseMcpClient(payload: unknown): McpClient | undefined {
   return payload === "opencode" || payload === "claude-code" ? payload : undefined;
 }
 
+function parseMcpInstructionScope(payload: unknown): McpInstructionScope | undefined {
+  return payload === "global" || payload === "repo" ? payload : undefined;
+}
+
 function getMcpClientLabel(client: McpClient): string {
   return client === "opencode" ? "OpenCode" : "Claude Code";
 }
@@ -373,6 +449,22 @@ async function selectMcpProjectRoot(event: IpcMainInvokeEvent, title: string): P
   };
   const result = ownerWindow ? await dialog.showOpenDialog(ownerWindow, openDialogOptions) : await dialog.showOpenDialog(openDialogOptions);
   return result.canceled ? undefined : result.filePaths[0];
+}
+
+async function confirmGlobalInstructionInstall(event: IpcMainInvokeEvent, client: McpClient): Promise<boolean> {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+  const options = {
+    buttons: ["Install Instructions", "Cancel"],
+    cancelId: 1,
+    defaultId: 0,
+    detail: "This updates user-level agent instructions so the agent knows when to use AgentDeck MCP for shared docs, todos, notes, and memory.",
+    message: `Install global AgentDeck instructions for ${getMcpClientLabel(client)}?`,
+    noLink: true,
+    title: "Install AgentDeck Instructions",
+    type: "question" as const,
+  };
+  const result = ownerWindow ? await dialog.showMessageBox(ownerWindow, options) : await dialog.showMessageBox(options);
+  return result.response === 0;
 }
 
 function isTrustedSessionOwner(event: IpcMainInvokeEvent, sessionId: string) {
