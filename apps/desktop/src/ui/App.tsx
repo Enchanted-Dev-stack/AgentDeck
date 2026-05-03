@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Memory, MemoryType, Note, Priority, Todo, TodoStatus, Workspace } from "@agentdeck/core";
 import { getMcpBridge, getSettingsBridge, getSharedStateBridge, getTerminalBridge, getWorkspaceBridge, type AppSettings, type McpActionResult, type McpClient, type McpSetupStatus, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import { createWorkspaceDocument } from "../workspace/schema.js";
@@ -62,6 +62,9 @@ interface RenameDialogState {
 const MIN_PANE_WIDTH = 220;
 const MIN_PANE_HEIGHT = 140;
 const MAX_PANE_TITLE_LENGTH = 80;
+const CONTEXT_MENU_MARGIN = 8;
+const ESTIMATED_CONTEXT_MENU_WIDTH = 190;
+const ESTIMATED_CONTEXT_MENU_HEIGHT = 236;
 const defaultAppSettings: AppSettings = { sharedContextEnabled: true };
 
 const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
@@ -379,7 +382,7 @@ export function App() {
   }
 
   async function saveWorkspace() {
-    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, tabs: terminalState.tabs }));
+    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, settings: appSettings, tabs: terminalState.tabs }));
   }
 
   async function importWorkspace() {
@@ -392,6 +395,15 @@ export function App() {
 
     setWorkspaceName(document.name);
     setTerminalState({ activeTabId: document.activeTabId, nextTabIndex: document.nextTabIndex, nextTerminalIndex: document.nextTerminalIndex, tabs: document.tabs });
+    setAppSettings(document.settings);
+    await getSettingsBridge()?.update(document.settings);
+    if (document.settings.sharedContextEnabled) {
+      await bootstrapSharedWorkspace();
+    } else {
+      setActiveWorkspace(null);
+      setWorkspaceError(null);
+      setWorkspaceLoading(false);
+    }
     clearTerminalSelection();
     setActivePage("terminal");
   }
@@ -1007,10 +1019,17 @@ function TerminalContextMenu({
 }) {
   const label = targets.length > 1 ? `${targets.length} terminals` : "terminal";
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState(() => getClampedContextMenuPosition(contextMenu.x, contextMenu.y, ESTIMATED_CONTEXT_MENU_WIDTH, ESTIMATED_CONTEXT_MENU_HEIGHT));
 
   useEffect(() => {
     menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
   }, []);
+
+  useLayoutEffect(() => {
+    const rect = menuRef.current?.getBoundingClientRect();
+    const nextPosition = getClampedContextMenuPosition(contextMenu.x, contextMenu.y, rect?.width || ESTIMATED_CONTEXT_MENU_WIDTH, rect?.height || ESTIMATED_CONTEXT_MENU_HEIGHT);
+    setMenuPosition((currentPosition) => (currentPosition.x === nextPosition.x && currentPosition.y === nextPosition.y ? currentPosition : nextPosition));
+  }, [contextMenu.x, contextMenu.y]);
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Escape") {
@@ -1022,7 +1041,7 @@ function TerminalContextMenu({
   }
 
   return (
-    <div className="terminal-context-menu" onKeyDown={handleKeyDown} ref={menuRef} role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
+    <div className="terminal-context-menu" onKeyDown={handleKeyDown} ref={menuRef} role="menu" style={{ left: menuPosition.x, top: menuPosition.y }} onClick={(event) => event.stopPropagation()}>
       <span className="terminal-context-menu__label">{canAdd ? `Add terminal beside ${label}` : "Select one attached pane group"}</span>
       <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "top")} role="menuitem" type="button">
         Top
@@ -1044,6 +1063,13 @@ function TerminalContextMenu({
       </button>
     </div>
   );
+}
+
+export function getClampedContextMenuPosition(x: number, y: number, width: number, height: number, viewportWidth = typeof window === "undefined" ? width + CONTEXT_MENU_MARGIN * 2 : window.innerWidth, viewportHeight = typeof window === "undefined" ? height + CONTEXT_MENU_MARGIN * 2 : window.innerHeight) {
+  return {
+    x: Math.min(Math.max(CONTEXT_MENU_MARGIN, x), Math.max(CONTEXT_MENU_MARGIN, viewportWidth - width - CONTEXT_MENU_MARGIN)),
+    y: Math.min(Math.max(CONTEXT_MENU_MARGIN, y), Math.max(CONTEXT_MENU_MARGIN, viewportHeight - height - CONTEXT_MENU_MARGIN)),
+  };
 }
 
 export function resizeSplitGroup(layout: SplitNode, groupId: string, index: number, deltaPixels: number, totalPixels: number, minBeforePixels: number, minAfterPixels = minBeforePixels): SplitNode {
@@ -2043,8 +2069,13 @@ function ResourceHeader({ description, eyebrow, icon, label }: { description: st
       </div>
       <div>
         <p className="resource-header__eyebrow">{eyebrow}</p>
-        <span>{label}</span>
-        <p>{description}</p>
+        <div className="resource-header__title-row">
+          <span>{label}</span>
+          <button aria-label={`${label} info`} className="resource-header__info" type="button">
+            i
+            <span role="tooltip">{description}</span>
+          </button>
+        </div>
       </div>
     </header>
   );

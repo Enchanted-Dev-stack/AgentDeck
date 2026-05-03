@@ -28,8 +28,9 @@ const validDocument: WorkspaceDocument = {
   name: "BridgeMind",
   nextTabIndex: 2,
   nextTerminalIndex: 2,
+  settings: { sharedContextEnabled: true },
   tabs: [tab],
-  version: 2,
+  version: 3,
 };
 
 const legacyDocument: LegacyWorkspaceDocument = {
@@ -47,6 +48,18 @@ describe("workspace schema", () => {
 
   test("converts a legacy workspace document into one tab", () => {
     expect(parseWorkspaceDocument(legacyDocument)).toEqual(validDocument);
+  });
+
+  test("converts a v2 workspace document with default settings", () => {
+    const { settings: _settings, version: _version, ...v2Document } = validDocument;
+    expect(parseWorkspaceDocument({ ...v2Document, version: 2 })).toEqual(validDocument);
+  });
+
+  test("preserves workspace shared context settings", () => {
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: false } })).toEqual({
+      ...validDocument,
+      settings: { sharedContextEnabled: false },
+    });
   });
 
   test("rejects unknown workspace versions", () => {

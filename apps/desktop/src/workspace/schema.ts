@@ -29,8 +29,13 @@ export interface WorkspaceDocument {
   name: string;
   nextTabIndex: number;
   nextTerminalIndex: number;
+  settings: WorkspaceSettings;
   tabs: WorkspaceTab[];
-  version: 2;
+  version: 3;
+}
+
+export interface WorkspaceSettings {
+  sharedContextEnabled: boolean;
 }
 
 export interface LegacyWorkspaceDocument {
@@ -53,8 +58,11 @@ export interface WorkspaceDocumentInput {
   name: string;
   nextTabIndex: number;
   nextTerminalIndex: number;
+  settings?: Partial<WorkspaceSettings>;
   tabs: WorkspaceTab[];
 }
+
+const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = { sharedContextEnabled: true };
 
 const MAX_WORKSPACE_ID_LENGTH = 80;
 const MAX_WORKSPACE_TABS = 24;
@@ -73,8 +81,9 @@ export function createWorkspaceDocument(input: WorkspaceDocumentInput): Workspac
     name: input.name.trim() || "Untitled Workspace",
     nextTabIndex: Math.max(1, Math.floor(input.nextTabIndex), getHighestGeneratedIndex(tabs.map((tab) => tab.id), "tab-") + 1),
     nextTerminalIndex: Math.max(1, Math.floor(input.nextTerminalIndex), getHighestGeneratedIndex(tabs.flatMap((tab) => Object.keys(tab.panes)), "term-") + 1),
+    settings: parseWorkspaceSettings(input.settings),
     tabs,
-    version: 2,
+    version: 3,
   };
 }
 
@@ -87,7 +96,7 @@ export function parseWorkspaceDocument(payload: unknown): WorkspaceDocument | nu
     return parseLegacyWorkspaceDocument(payload);
   }
 
-  if (payload.version !== 2 || typeof payload.name !== "string" || !isValidWorkspaceId(payload.activeTabId) || typeof payload.nextTabIndex !== "number" || !Number.isInteger(payload.nextTabIndex) || typeof payload.nextTerminalIndex !== "number" || !Number.isInteger(payload.nextTerminalIndex) || !Array.isArray(payload.tabs) || payload.tabs.length === 0 || payload.tabs.length > MAX_WORKSPACE_TABS) {
+  if ((payload.version !== 2 && payload.version !== 3) || typeof payload.name !== "string" || !isValidWorkspaceId(payload.activeTabId) || typeof payload.nextTabIndex !== "number" || !Number.isInteger(payload.nextTabIndex) || typeof payload.nextTerminalIndex !== "number" || !Number.isInteger(payload.nextTerminalIndex) || !Array.isArray(payload.tabs) || payload.tabs.length === 0 || payload.tabs.length > MAX_WORKSPACE_TABS) {
     return null;
   }
 
@@ -122,6 +131,7 @@ export function parseWorkspaceDocument(payload: unknown): WorkspaceDocument | nu
     name: payload.name,
     nextTabIndex: payload.nextTabIndex,
     nextTerminalIndex: payload.nextTerminalIndex,
+    settings: payload.version === 3 ? parseWorkspaceSettings(payload.settings) : DEFAULT_WORKSPACE_SETTINGS,
     tabs: tabs as WorkspaceTab[],
   });
 }
@@ -142,8 +152,19 @@ function parseLegacyWorkspaceDocument(payload: Record<string, unknown>): Workspa
     name: payload.name,
     nextTabIndex: 2,
     nextTerminalIndex,
+    settings: DEFAULT_WORKSPACE_SETTINGS,
     tabs: [tab],
   });
+}
+
+function parseWorkspaceSettings(payload: unknown): WorkspaceSettings {
+  if (!isObject(payload)) {
+    return DEFAULT_WORKSPACE_SETTINGS;
+  }
+
+  return {
+    sharedContextEnabled: typeof payload.sharedContextEnabled === "boolean" ? payload.sharedContextEnabled : DEFAULT_WORKSPACE_SETTINGS.sharedContextEnabled,
+  };
 }
 
 function parseWorkspaceTab(payload: unknown): WorkspaceTab | null {

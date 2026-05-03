@@ -9,7 +9,7 @@ vi.mock("./TerminalEmulator.js", () => ({
   TerminalEmulator: ({ paneId }: { paneId: string }) => <div data-testid={`terminal-emulator-${paneId}`} />,
 }));
 
-import { App, canInsertTerminalOnSide, getTerminalRange, initialSplitLayout, insertTerminal, insertTerminalOnSide, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
+import { App, canInsertTerminalOnSide, getClampedContextMenuPosition, getTerminalRange, initialSplitLayout, insertTerminal, insertTerminalOnSide, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
 
 afterEach(() => cleanup());
 afterEach(() => {
@@ -99,6 +99,11 @@ describe("App", () => {
     expect(insertTerminalOnSide(initialSplitLayout, ["term-2", "term-3"], "term-5", "right")).toBe(initialSplitLayout);
   });
 
+  test("keeps terminal context menus inside the viewport", () => {
+    expect(getClampedContextMenuPosition(790, 590, 190, 236, 800, 600)).toEqual({ x: 602, y: 356 });
+    expect(getClampedContextMenuPosition(-20, -12, 190, 236, 800, 600)).toEqual({ x: 8, y: 8 });
+  });
+
   test("inserts terminals to the requested side", () => {
     const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-1"], "term-5", "left");
 
@@ -151,7 +156,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 2, nextTerminalIndex: 5 });
+    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 5, settings: { sharedContextEnabled: true } });
     expect((savedDocuments[0] as { tabs: unknown[] }).tabs).toHaveLength(1);
   });
 
@@ -166,6 +171,7 @@ describe("App", () => {
             name: "Imported",
             nextTabIndex: 10,
             nextTerminalIndex: 10,
+            settings: { sharedContextEnabled: false },
             tabs: [
               {
                 id: "tab-9",
@@ -176,7 +182,7 @@ describe("App", () => {
                 title: "Imported Tab",
               },
             ],
-            version: 2,
+            version: 3,
           }),
         saveWorkspace: () => Promise.resolve(true),
       },
@@ -189,6 +195,8 @@ describe("App", () => {
     expect(screen.queryByLabelText("OpenCode terminal")).toBeNull();
     expect(closeSession).toHaveBeenCalledWith("term-1");
     expect(closeSession).toHaveBeenCalledWith("term-4");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Settings" }));
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
   });
 
   test("creates and switches terminal tabs", () => {
