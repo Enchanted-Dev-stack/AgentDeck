@@ -57,6 +57,13 @@ export interface CreateNoteInput {
   source?: NoteSource | undefined;
 }
 
+export interface UpdateNoteInput {
+  title?: string | undefined;
+  body?: string | undefined;
+  tags?: string[] | undefined;
+  source?: NoteSource | undefined;
+}
+
 export interface CreateMemoryInput {
   workspaceId: string;
   type?: MemoryType | undefined;
@@ -83,23 +90,39 @@ export class AgentDeckStore {
 
   async getWorkspace(workspaceId: string): Promise<Workspace> {
     const state = await this.readState();
-    return requireEntity(state.workspaces.find((workspace) => workspace.id === workspaceId), "workspace", workspaceId);
+    return requireEntity(
+      state.workspaces.find((workspace) => workspace.id === workspaceId),
+      "workspace",
+      workspaceId,
+    );
   }
 
-  async findWorkspaceByRootPath(rootPath: string): Promise<Workspace | undefined> {
+  async findWorkspaceByRootPath(
+    rootPath: string,
+  ): Promise<Workspace | undefined> {
     const state = await this.readState();
     const normalizedRootPath = normalizeRootPath(rootPath);
-    return state.workspaces.find((workspace) => areSamePath(workspace.rootPath, normalizedRootPath));
+    return state.workspaces.find((workspace) =>
+      areSamePath(workspace.rootPath, normalizedRootPath),
+    );
   }
 
   async createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
-    assertNoSecrets("workspace", [input.name, input.rootPath, input.description ?? ""]);
+    assertNoSecrets("workspace", [
+      input.name,
+      input.rootPath,
+      input.description ?? "",
+    ]);
     const normalizedRootPath = normalizeRootPath(input.rootPath);
 
     return this.mutateState((state) => {
-      const existingWorkspace = state.workspaces.find((workspace) => areSamePath(workspace.rootPath, normalizedRootPath));
+      const existingWorkspace = state.workspaces.find((workspace) =>
+        areSamePath(workspace.rootPath, normalizedRootPath),
+      );
       if (existingWorkspace) {
-        throw new Error(`Workspace already exists for root path: ${normalizedRootPath}`);
+        throw new Error(
+          `Workspace already exists for root path: ${normalizedRootPath}`,
+        );
       }
 
       const now = new Date().toISOString();
@@ -123,10 +146,21 @@ export class AgentDeckStore {
   }
 
   async createPane(input: CreatePaneInput): Promise<Pane> {
-    assertNoSecrets("pane", [input.name, input.role ?? "", input.command ?? "", input.cwd ?? ""]);
+    assertNoSecrets("pane", [
+      input.name,
+      input.role ?? "",
+      input.command ?? "",
+      input.cwd ?? "",
+    ]);
 
     return this.mutateState((state) => {
-      requireEntity(state.workspaces.find((workspace) => workspace.id === input.workspaceId), "workspace", input.workspaceId);
+      requireEntity(
+        state.workspaces.find(
+          (workspace) => workspace.id === input.workspaceId,
+        ),
+        "workspace",
+        input.workspaceId,
+      );
       const now = new Date().toISOString();
       const pane: Pane = {
         id: randomUUID(),
@@ -136,7 +170,10 @@ export class AgentDeckStore {
         command: input.command ?? "",
         cwd: input.cwd ?? ".",
         autoStart: input.autoStart ?? false,
-        position: input.position ?? state.panes.filter((item) => item.workspaceId === input.workspaceId).length,
+        position:
+          input.position ??
+          state.panes.filter((item) => item.workspaceId === input.workspaceId)
+            .length,
         createdAt: now,
         updatedAt: now,
       };
@@ -153,15 +190,38 @@ export class AgentDeckStore {
 
   async listTodos(workspaceId: string): Promise<Todo[]> {
     const state = await this.readState();
-    requireEntity(state.workspaces.find((workspace) => workspace.id === workspaceId), "workspace", workspaceId);
+    requireEntity(
+      state.workspaces.find((workspace) => workspace.id === workspaceId),
+      "workspace",
+      workspaceId,
+    );
     return state.todos.filter((todo) => todo.workspaceId === workspaceId);
   }
 
+  async getTodo(todoId: string): Promise<Todo> {
+    const state = await this.readState();
+    return requireEntity(
+      state.todos.find((todo) => todo.id === todoId),
+      "todo",
+      todoId,
+    );
+  }
+
   async createTodo(input: CreateTodoInput): Promise<Todo> {
-    assertNoSecrets("todo", [input.title, input.description ?? "", ...(input.tags ?? [])]);
+    assertNoSecrets("todo", [
+      input.title,
+      input.description ?? "",
+      ...(input.tags ?? []),
+    ]);
 
     return this.mutateState((state) => {
-      requireEntity(state.workspaces.find((workspace) => workspace.id === input.workspaceId), "workspace", input.workspaceId);
+      requireEntity(
+        state.workspaces.find(
+          (workspace) => workspace.id === input.workspaceId,
+        ),
+        "workspace",
+        input.workspaceId,
+      );
       const now = new Date().toISOString();
       const todo: Todo = {
         id: randomUUID(),
@@ -186,10 +246,18 @@ export class AgentDeckStore {
   }
 
   async updateTodo(todoId: string, input: UpdateTodoInput): Promise<Todo> {
-    assertNoSecrets("todo", [input.title ?? "", input.description ?? "", ...(input.tags ?? [])]);
+    assertNoSecrets("todo", [
+      input.title ?? "",
+      input.description ?? "",
+      ...(input.tags ?? []),
+    ]);
 
     return this.mutateState((state) => {
-      const current = requireEntity(state.todos.find((todo) => todo.id === todoId), "todo", todoId);
+      const current = requireEntity(
+        state.todos.find((todo) => todo.id === todoId),
+        "todo",
+        todoId,
+      );
       const updated: Todo = {
         ...current,
         title: input.title ?? current.title,
@@ -203,18 +271,48 @@ export class AgentDeckStore {
       return {
         state: {
           ...state,
-          todos: state.todos.map((todo) => (todo.id === todoId ? updated : todo)),
+          todos: state.todos.map((todo) =>
+            todo.id === todoId ? updated : todo,
+          ),
         },
         result: updated,
       };
     });
   }
 
+  async deleteTodo(todoId: string): Promise<Todo> {
+    return this.mutateState((state) => {
+      const current = requireEntity(
+        state.todos.find((todo) => todo.id === todoId),
+        "todo",
+        todoId,
+      );
+
+      return {
+        state: {
+          ...state,
+          todos: state.todos.filter((todo) => todo.id !== todoId),
+        },
+        result: current,
+      };
+    });
+  }
+
   async createNote(input: CreateNoteInput): Promise<Note> {
-    assertNoSecrets("note", [input.title, input.body ?? "", ...(input.tags ?? [])]);
+    assertNoSecrets("note", [
+      input.title,
+      input.body ?? "",
+      ...(input.tags ?? []),
+    ]);
 
     return this.mutateState((state) => {
-      requireEntity(state.workspaces.find((workspace) => workspace.id === input.workspaceId), "workspace", input.workspaceId);
+      requireEntity(
+        state.workspaces.find(
+          (workspace) => workspace.id === input.workspaceId,
+        ),
+        "workspace",
+        input.workspaceId,
+      );
       const now = new Date().toISOString();
       const note: Note = {
         id: randomUUID(),
@@ -239,15 +337,90 @@ export class AgentDeckStore {
 
   async listNotes(workspaceId: string): Promise<Note[]> {
     const state = await this.readState();
-    requireEntity(state.workspaces.find((workspace) => workspace.id === workspaceId), "workspace", workspaceId);
+    requireEntity(
+      state.workspaces.find((workspace) => workspace.id === workspaceId),
+      "workspace",
+      workspaceId,
+    );
     return state.notes.filter((note) => note.workspaceId === workspaceId);
   }
 
-  async storeMemory(input: CreateMemoryInput): Promise<Memory> {
-    assertNoSecrets("memory", [input.content, input.source ?? "", ...(input.tags ?? [])]);
+  async getNote(noteId: string): Promise<Note> {
+    const state = await this.readState();
+    return requireEntity(
+      state.notes.find((note) => note.id === noteId),
+      "note",
+      noteId,
+    );
+  }
+
+  async updateNote(noteId: string, input: UpdateNoteInput): Promise<Note> {
+    assertNoSecrets("note", [
+      input.title ?? "",
+      input.body ?? "",
+      ...(input.tags ?? []),
+    ]);
 
     return this.mutateState((state) => {
-      requireEntity(state.workspaces.find((workspace) => workspace.id === input.workspaceId), "workspace", input.workspaceId);
+      const current = requireEntity(
+        state.notes.find((note) => note.id === noteId),
+        "note",
+        noteId,
+      );
+      const updated: Note = {
+        ...current,
+        title: input.title ?? current.title,
+        body: input.body ?? current.body,
+        tags: input.tags ?? current.tags,
+        source: input.source ?? current.source,
+        updatedAt: new Date().toISOString(),
+      };
+
+      return {
+        state: {
+          ...state,
+          notes: state.notes.map((note) =>
+            note.id === noteId ? updated : note,
+          ),
+        },
+        result: updated,
+      };
+    });
+  }
+
+  async deleteNote(noteId: string): Promise<Note> {
+    return this.mutateState((state) => {
+      const current = requireEntity(
+        state.notes.find((note) => note.id === noteId),
+        "note",
+        noteId,
+      );
+
+      return {
+        state: {
+          ...state,
+          notes: state.notes.filter((note) => note.id !== noteId),
+        },
+        result: current,
+      };
+    });
+  }
+
+  async storeMemory(input: CreateMemoryInput): Promise<Memory> {
+    assertNoSecrets("memory", [
+      input.content,
+      input.source ?? "",
+      ...(input.tags ?? []),
+    ]);
+
+    return this.mutateState((state) => {
+      requireEntity(
+        state.workspaces.find(
+          (workspace) => workspace.id === input.workspaceId,
+        ),
+        "workspace",
+        input.workspaceId,
+      );
       const now = new Date().toISOString();
       const memory: Memory = {
         id: randomUUID(),
@@ -270,20 +443,47 @@ export class AgentDeckStore {
     });
   }
 
+  async getMemory(memoryId: string): Promise<Memory> {
+    const state = await this.readState();
+    return requireEntity(
+      state.memories.find((memory) => memory.id === memoryId),
+      "memory",
+      memoryId,
+    );
+  }
+
   async searchMemory(workspaceId: string, query: string): Promise<Memory[]> {
     const state = await this.readState();
-    requireEntity(state.workspaces.find((workspace) => workspace.id === workspaceId), "workspace", workspaceId);
+    requireEntity(
+      state.workspaces.find((workspace) => workspace.id === workspaceId),
+      "workspace",
+      workspaceId,
+    );
     const normalizedQuery = query.toLowerCase();
     return state.memories.filter((memory) => {
-      return memory.workspaceId === workspaceId && memory.content.toLowerCase().includes(normalizedQuery);
+      return (
+        memory.workspaceId === workspaceId &&
+        memory.content.toLowerCase().includes(normalizedQuery)
+      );
     });
   }
 
   async getProjectContext(workspaceId: string): Promise<ProjectContext> {
     const state = await this.readState();
-    const workspace = requireEntity(state.workspaces.find((item) => item.id === workspaceId), "workspace", workspaceId);
-    const panes = state.panes.filter((pane) => pane.workspaceId === workspaceId);
-    const openTodos = state.todos.filter((todo) => todo.workspaceId === workspaceId && todo.status !== "done" && todo.status !== "cancelled");
+    const workspace = requireEntity(
+      state.workspaces.find((item) => item.id === workspaceId),
+      "workspace",
+      workspaceId,
+    );
+    const panes = state.panes.filter(
+      (pane) => pane.workspaceId === workspaceId,
+    );
+    const openTodos = state.todos.filter(
+      (todo) =>
+        todo.workspaceId === workspaceId &&
+        todo.status !== "done" &&
+        todo.status !== "cancelled",
+    );
     const recentNotes = [...state.notes]
       .filter((note) => note.workspaceId === workspaceId)
       .sort(sortByUpdatedAtDesc)
@@ -331,7 +531,12 @@ export class AgentDeckStore {
     await rename(tempFilePath, this.filePath);
   }
 
-  private async mutateState<Result>(mutator: (state: AgentDeckState) => { state: AgentDeckState; result: Result }): Promise<Result> {
+  private async mutateState<Result>(
+    mutator: (state: AgentDeckState) => {
+      state: AgentDeckState;
+      result: Result;
+    },
+  ): Promise<Result> {
     return withFileLock(`${this.filePath}.lock`, async () => {
       const currentState = await this.readState();
       const mutation = mutator(currentState);
@@ -341,7 +546,10 @@ export class AgentDeckStore {
   }
 }
 
-async function withFileLock<Result>(lockFilePath: string, callback: () => Promise<Result>): Promise<Result> {
+async function withFileLock<Result>(
+  lockFilePath: string,
+  callback: () => Promise<Result>,
+): Promise<Result> {
   await mkdir(dirname(lockFilePath), { recursive: true });
   const lock = await acquireLock(lockFilePath);
 
@@ -370,7 +578,11 @@ async function acquireLock(lockFilePath: string) {
   }
 }
 
-function requireEntity<T>(entity: T | undefined, entityName: string, id: string): T {
+function requireEntity<T>(
+  entity: T | undefined,
+  entityName: string,
+  id: string,
+): T {
   if (!entity) {
     throw new Error(`Unknown ${entityName}: ${id}`);
   }
@@ -378,16 +590,29 @@ function requireEntity<T>(entity: T | undefined, entityName: string, id: string)
   return entity;
 }
 
-function sortByUpdatedAtDesc(left: { updatedAt: string }, right: { updatedAt: string }): number {
+function sortByUpdatedAtDesc(
+  left: { updatedAt: string },
+  right: { updatedAt: string },
+): number {
   return right.updatedAt.localeCompare(left.updatedAt);
 }
 
 function isFileNotFoundError(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ENOENT",
+  );
 }
 
 function isAlreadyExistsError(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && error.code === "EEXIST");
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "EEXIST",
+  );
 }
 
 function delay(ms: number): Promise<void> {
@@ -399,7 +624,9 @@ function delay(ms: number): Promise<void> {
 function assertNoSecrets(entityName: string, values: string[]): void {
   const combinedValue = values.join("\n");
   if (mayContainSecret(combinedValue)) {
-    throw new Error(`${entityName} appears to contain a secret. Refusing to store it in shared context.`);
+    throw new Error(
+      `${entityName} appears to contain a secret. Refusing to store it in shared context.`,
+    );
   }
 }
 
@@ -410,5 +637,7 @@ function normalizeRootPath(rootPath: string): string {
 function areSamePath(left: string, right: string): boolean {
   const normalizedLeft = normalizeRootPath(left);
   const normalizedRight = normalizeRootPath(right);
-  return process.platform === "win32" ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase() : normalizedLeft === normalizedRight;
+  return process.platform === "win32"
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
 }

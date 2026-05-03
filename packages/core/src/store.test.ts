@@ -30,10 +30,12 @@ describe("AgentDeckStore", () => {
 
     const secondStore = new AgentDeckStore(filePath);
 
-    await expect(secondStore.getWorkspace(workspace.id)).resolves.toMatchObject({
-      id: workspace.id,
-      name: "Persistent",
-    });
+    await expect(secondStore.getWorkspace(workspace.id)).resolves.toMatchObject(
+      {
+        id: workspace.id,
+        name: "Persistent",
+      },
+    );
   });
 
   test("serializes concurrent writes from separate store instances", async () => {
@@ -87,6 +89,66 @@ describe("AgentDeckStore", () => {
 
     expect(state.version).toBe(1);
     expect(state.workspaces).toHaveLength(1);
+  });
+
+  test("gets and deletes todos", async () => {
+    const store = await createTestStore();
+    const workspace = await store.createWorkspace({
+      name: "Todos",
+      rootPath: ".",
+    });
+    const todo = await store.createTodo({
+      workspaceId: workspace.id,
+      title: "Remove me",
+    });
+
+    await expect(store.getTodo(todo.id)).resolves.toEqual(todo);
+    await expect(store.deleteTodo(todo.id)).resolves.toEqual(todo);
+    await expect(store.listTodos(workspace.id)).resolves.toEqual([]);
+  });
+
+  test("gets updates and deletes notes", async () => {
+    const store = await createTestStore();
+    const workspace = await store.createWorkspace({
+      name: "Notes",
+      rootPath: ".",
+    });
+    const note = await store.createNote({
+      workspaceId: workspace.id,
+      title: "Draft",
+      body: "Initial body",
+    });
+
+    await expect(store.getNote(note.id)).resolves.toEqual(note);
+    const updatedNote = await store.updateNote(note.id, {
+      title: "Updated",
+      body: "Final body",
+      tags: ["handoff"],
+    });
+
+    expect(updatedNote).toMatchObject({
+      id: note.id,
+      title: "Updated",
+      body: "Final body",
+      tags: ["handoff"],
+    });
+    await expect(store.deleteNote(note.id)).resolves.toEqual(updatedNote);
+    await expect(store.listNotes(workspace.id)).resolves.toEqual([]);
+  });
+
+  test("gets stored memory", async () => {
+    const store = await createTestStore();
+    const workspace = await store.createWorkspace({
+      name: "Memory",
+      rootPath: ".",
+    });
+    const memory = await store.storeMemory({
+      workspaceId: workspace.id,
+      type: "decision",
+      content: "Use local MCP by default.",
+    });
+
+    await expect(store.getMemory(memory.id)).resolves.toEqual(memory);
   });
 });
 

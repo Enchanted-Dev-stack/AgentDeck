@@ -36,7 +36,7 @@ Tools use dot-separated names grouped by domain.
 - `workspace://{workspaceId}`
 - `todo://{todoId}`
 - `note://{noteId}`
-- `doc://{workspaceId}/{path}`
+- `doc://{workspaceId}/{+path}`
 - `memory://{memoryId}`
 
 ## Initial Prompts
@@ -50,6 +50,7 @@ Tools use dot-separated names grouped by domain.
 ## Safety Rules
 
 - V1 MCP tools do not execute arbitrary shell commands.
-- Docs reads must stay inside configured workspace doc roots.
+- Docs reads stay inside `<workspace.rootPath>/docs`.
+- Docs reads only return supported text documentation files: `.adoc`, `.md`, `.mdx`, `.rst`, and `.txt`.
 - Secret-looking memory writes should be rejected or require explicit override.
 - Tool outputs should include structured content and readable text summaries.
