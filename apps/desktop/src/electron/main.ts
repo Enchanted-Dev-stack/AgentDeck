@@ -1,11 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, type OpenDialogOptions, type SaveDialogOptions } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent, type OpenDialogOptions, type SaveDialogOptions } from "electron";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { buildAgentDeckServerSpec, createManualConfigSnippet, getClientConfigPath, installMcpConfig, removeMcpConfig, type McpClient } from "@agentdeck/mcp-server";
 import * as pty from "node-pty";
 import { resolveDefaultShell, TerminalSessionHost, type PtyAdapter, type ResolvedShell, type TerminalSpawnOptions } from "@agentdeck/terminal";
-import { terminalChannels, workspaceChannels, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { mcpChannels, terminalChannels, workspaceChannels, type McpActionResult, type TerminalCreateRequest } from "../terminal/bridge.js";
 import { parseWorkspaceDocument } from "../workspace/schema.js";
 
 const MAX_TERMINAL_ID_LENGTH = 80;
@@ -176,6 +179,105 @@ function registerWorkspaceIpc() {
   });
 }
 
+function registerMcpIpc() {
+  ipcMain.handle(mcpChannels.copyConfig, (event, clientPayload: unknown): McpActionResult => {
+    if (!isTrustedIpcEvent(event)) {
+      return createMcpErrorResult("Unable to copy MCP config from an untrusted renderer.");
+    }
+
+    const client = parseMcpClient(clientPayload);
+    if (!client) {
+      return createMcpErrorResult("Unknown MCP client.");
+    }
+
+    try {
+      const snippet = createManualConfigSnippet(client, createAgentDeckMcpServerSpec());
+      clipboard.writeText(snippet);
+      return {
+        changed: false,
+        message: `${getMcpClientLabel(client)} config copied to clipboard.`,
+        ok: true,
+        status: "manual",
+      };
+    } catch (error) {
+      console.error("Failed to copy MCP config", error);
+      return createMcpErrorResult(error instanceof Error ? error.message : "Failed to copy MCP config.");
+    }
+  });
+
+  ipcMain.handle(mcpChannels.install, async (event, clientPayload: unknown): Promise<McpActionResult> => {
+    if (!isTrustedIpcEvent(event)) {
+      return createMcpErrorResult("Unable to install MCP config from an untrusted renderer.");
+    }
+
+    const client = parseMcpClient(clientPayload);
+    if (!client) {
+      return createMcpErrorResult("Unknown MCP client.");
+    }
+
+    const projectRoot = await selectMcpProjectRoot(event, `Install AgentDeck MCP for ${getMcpClientLabel(client)}`);
+    if (!projectRoot) {
+      return {
+        changed: false,
+        message: "MCP install cancelled.",
+        ok: false,
+        status: "cancelled",
+      };
+    }
+
+    try {
+      const result = await installMcpConfig({ client, configPath: getClientConfigPath(client, projectRoot), server: createAgentDeckMcpServerSpec() });
+      return {
+        backupPath: result.backupPath,
+        changed: result.changed,
+        configPath: result.configPath,
+        message: result.changed ? `${getMcpClientLabel(client)} config updated.` : `${getMcpClientLabel(client)} already has AgentDeck MCP configured.`,
+        ok: true,
+        status: "installed",
+      };
+    } catch (error) {
+      console.error("Failed to install MCP config", error);
+      return createMcpErrorResult(error instanceof Error ? error.message : "Failed to install MCP config.");
+    }
+  });
+
+  ipcMain.handle(mcpChannels.uninstall, async (event, clientPayload: unknown): Promise<McpActionResult> => {
+    if (!isTrustedIpcEvent(event)) {
+      return createMcpErrorResult("Unable to uninstall MCP config from an untrusted renderer.");
+    }
+
+    const client = parseMcpClient(clientPayload);
+    if (!client) {
+      return createMcpErrorResult("Unknown MCP client.");
+    }
+
+    const projectRoot = await selectMcpProjectRoot(event, `Uninstall AgentDeck MCP for ${getMcpClientLabel(client)}`);
+    if (!projectRoot) {
+      return {
+        changed: false,
+        message: "MCP uninstall cancelled.",
+        ok: false,
+        status: "cancelled",
+      };
+    }
+
+    try {
+      const result = await removeMcpConfig({ client, configPath: getClientConfigPath(client, projectRoot) });
+      return {
+        backupPath: result.backupPath,
+        changed: result.changed,
+        configPath: result.configPath,
+        message: result.changed ? `${getMcpClientLabel(client)} AgentDeck MCP entry removed.` : `${getMcpClientLabel(client)} did not have AgentDeck MCP configured.`,
+        ok: true,
+        status: "not_installed",
+      };
+    } catch (error) {
+      console.error("Failed to uninstall MCP config", error);
+      return createMcpErrorResult(error instanceof Error ? error.message : "Failed to uninstall MCP config.");
+    }
+  });
+}
+
 function parseCreateRequest(payload: unknown): TerminalCreateRequest | undefined {
   if (!isPlainObject(payload) || !hasOnlyKeys(payload, ["cols", "id", "rows"])) {
     return undefined;
@@ -213,6 +315,64 @@ function isPlainObject(payload: unknown): payload is Record<string, unknown> {
 
 function hasOnlyKeys(payload: Record<string, unknown>, allowedKeys: string[]) {
   return Object.keys(payload).every((key) => allowedKeys.includes(key));
+}
+
+function parseMcpClient(payload: unknown): McpClient | undefined {
+  return payload === "opencode" || payload === "claude-code" ? payload : undefined;
+}
+
+function getMcpClientLabel(client: McpClient): string {
+  return client === "opencode" ? "OpenCode" : "Claude Code";
+}
+
+function createAgentDeckMcpServerSpec() {
+  return buildAgentDeckServerSpec({ command: resolveNodeCommand(), commandArgs: [resolveAgentDeckMcpCliPath()], stateFilePath: getAgentDeckStateFilePath() });
+}
+
+function resolveAgentDeckMcpCliPath() {
+  const require = createRequire(import.meta.url);
+  const cliPath = join(dirname(require.resolve("@agentdeck/mcp-server/package.json")), "dist", "cli.js");
+  if (!existsSync(cliPath)) {
+    throw new Error(`AgentDeck MCP CLI is not built: ${cliPath}`);
+  }
+
+  return cliPath;
+}
+
+function resolveNodeCommand() {
+  if (process.platform === "win32") {
+    if (!isWindowsCommandAvailable("node.exe")) {
+      throw new Error("Unable to find node.exe on PATH for AgentDeck MCP config.");
+    }
+
+    return "node.exe";
+  }
+
+  return "node";
+}
+
+function getAgentDeckStateFilePath() {
+  return join(app.getPath("userData"), "agentdeck-state.json");
+}
+
+function createMcpErrorResult(message: string): McpActionResult {
+  return {
+    changed: false,
+    message,
+    ok: false,
+    status: "error",
+  };
+}
+
+async function selectMcpProjectRoot(event: IpcMainInvokeEvent, title: string): Promise<string | undefined> {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+  const openDialogOptions: OpenDialogOptions = {
+    defaultPath: app.getPath("home"),
+    properties: ["openDirectory"],
+    title,
+  };
+  const result = ownerWindow ? await dialog.showOpenDialog(ownerWindow, openDialogOptions) : await dialog.showOpenDialog(openDialogOptions);
+  return result.canceled ? undefined : result.filePaths[0];
 }
 
 function isTrustedSessionOwner(event: IpcMainInvokeEvent, sessionId: string) {
@@ -324,6 +484,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  registerMcpIpc();
   registerTerminalIpc();
   registerWorkspaceIpc();
   const window = createWindow();
@@ -331,7 +492,7 @@ app.whenReady().then(() => {
   if (process.env.AGENTDECK_SMOKE_TEST === "1") {
     const fallbackTimer = setTimeout(() => process.exit(1), 5_000);
     window.webContents.once("did-finish-load", async () => {
-      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.terminal && window.agentDeck?.workspace)");
+      const hasBridge = await window.webContents.executeJavaScript("Boolean(window.agentDeck?.mcp && window.agentDeck?.terminal && window.agentDeck?.workspace)");
       console.log(`AgentDeck preload bridge: ${hasBridge ? "available" : "missing"}`);
       setTimeout(() => {
         clearTimeout(fallbackTimer);

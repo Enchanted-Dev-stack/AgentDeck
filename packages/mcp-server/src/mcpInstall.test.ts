@@ -25,6 +25,20 @@ describe("MCP client installers", () => {
     });
   });
 
+  test("supports wrapper command arguments before the state file flag", () => {
+    expect(
+      buildAgentDeckServerSpec({
+        command: "node",
+        commandArgs: ["/app/agentdeck-mcp.js"],
+        stateFilePath: "/tmp/agentdeck/state.json",
+      }),
+    ).toEqual({
+      name: "agentdeck",
+      command: "node",
+      args: ["/app/agentdeck-mcp.js", "--state-file", "/tmp/agentdeck/state.json"],
+    });
+  });
+
   test("patches OpenCode config without removing unrelated settings", () => {
     const config = patchMcpConfig(
       "opencode",
@@ -236,6 +250,34 @@ describe("MCP client installers", () => {
       installMcpConfig({
         client: "opencode",
         configPath,
+        server: buildAgentDeckServerSpec({
+          command: "agentdeck-mcp",
+          stateFilePath: join(root, "state.json"),
+        }),
+      }),
+    ).rejects.toThrow(/symlink/i);
+  });
+
+  test("rejects config files in symlinked directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agentdeck-symlink-parent-"));
+    const realProject = join(root, "real-project");
+    const linkedProject = join(root, "linked-project");
+    await mkdir(realProject);
+
+    try {
+      await symlink(realProject, linkedProject, "dir");
+    } catch (error) {
+      if (isWindowsPrivilegeError(error)) {
+        return;
+      }
+
+      throw error;
+    }
+
+    await expect(
+      installMcpConfig({
+        client: "opencode",
+        configPath: join(linkedProject, "opencode.json"),
         server: buildAgentDeckServerSpec({
           command: "agentdeck-mcp",
           stateFilePath: join(root, "state.json"),

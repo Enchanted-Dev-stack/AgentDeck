@@ -29,8 +29,11 @@ importers:
       '@agentdeck/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentdeck/mcp-server':
+        specifier: workspace:*
+        version: link:../../packages/mcp-server
       '@agentdeck/terminal':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../packages/terminal
       '@fontsource/jetbrains-mono':
         specifier: ^5.2.8

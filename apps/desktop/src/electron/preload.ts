@@ -1,9 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { terminalChannels, workspaceChannels, type AgentDeckBridge, type TerminalCreateRequest } from "../terminal/bridge.js";
+import { mcpChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type McpActionResult, type McpClient, type TerminalCreateRequest } from "../terminal/bridge.js";
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
 import type { WorkspaceDocument } from "../workspace/schema.js";
 
 const bridge: AgentDeckBridge = {
+  mcp: {
+    copyConfig: (client: McpClient) => ipcRenderer.invoke(mcpChannels.copyConfig, client) as Promise<McpActionResult>,
+    install: (client: McpClient) => ipcRenderer.invoke(mcpChannels.install, client) as Promise<McpActionResult>,
+    uninstall: (client: McpClient) => ipcRenderer.invoke(mcpChannels.uninstall, client) as Promise<McpActionResult>,
+  },
   terminal: {
     closeSession: (id: string) => ipcRenderer.invoke(terminalChannels.close, id) as Promise<boolean>,
     createSession: (request: TerminalCreateRequest) => ipcRenderer.invoke(terminalChannels.create, request) as Promise<boolean>,

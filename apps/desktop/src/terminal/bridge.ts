@@ -15,6 +15,23 @@ export const workspaceChannels = {
   save: "workspace:save",
 } as const;
 
+export const mcpChannels = {
+  copyConfig: "mcp:copy-config",
+  install: "mcp:install",
+  uninstall: "mcp:uninstall",
+} as const;
+
+export type McpClient = "opencode" | "claude-code";
+
+export interface McpActionResult {
+  backupPath?: string | undefined;
+  changed: boolean;
+  configPath?: string | undefined;
+  message: string;
+  ok: boolean;
+  status: "installed" | "manual" | "not_installed" | "cancelled" | "error";
+}
+
 export interface TerminalCreateRequest {
   cols: number;
   id: string;
@@ -35,7 +52,14 @@ export interface WorkspaceBridge {
   saveWorkspace: (document: WorkspaceDocument) => Promise<boolean>;
 }
 
+export interface McpBridge {
+  copyConfig: (client: McpClient) => Promise<McpActionResult>;
+  install: (client: McpClient) => Promise<McpActionResult>;
+  uninstall: (client: McpClient) => Promise<McpActionResult>;
+}
+
 export interface AgentDeckBridge {
+  mcp: McpBridge;
   terminal: TerminalBridge;
   workspace: WorkspaceBridge;
 }
@@ -52,4 +76,8 @@ export function getTerminalBridge() {
 
 export function getWorkspaceBridge() {
   return typeof window === "undefined" ? undefined : window.agentDeck?.workspace;
+}
+
+export function getMcpBridge() {
+  return typeof window === "undefined" ? undefined : window.agentDeck?.mcp;
 }

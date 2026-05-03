@@ -660,6 +660,7 @@ button {
 }
 
 .resource-grid,
+.integration-grid,
 .memory-list,
 .todo-list {
   display: grid;
@@ -671,7 +672,12 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.integration-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
 .resource-card,
+.integration-card,
 .memory-card,
 .todo-list li {
   background: var(--surface-soft);
@@ -680,11 +686,18 @@ button {
 }
 
 .resource-card,
+.integration-card,
 .memory-card {
   padding: 16px;
 }
 
+.integration-card {
+  display: grid;
+  gap: 16px;
+}
+
 .resource-card span,
+.integration-card span,
 .memory-card span,
 .todo-list span {
   color: var(--accent);
@@ -701,7 +714,15 @@ button {
   margin: 10px 0 8px;
 }
 
+.integration-card h2 {
+  color: var(--text);
+  font-size: 20px;
+  letter-spacing: -0.04em;
+  margin: 10px 0 8px;
+}
+
 .resource-card p,
+.integration-card p,
 .memory-card p {
   font-size: 14px;
   line-height: 1.5;
@@ -710,6 +731,43 @@ button {
 
 .memory-card p {
   margin-top: 8px;
+}
+
+.integration-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.integration-card__actions button {
+  background: #1a2029;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  height: 34px;
+  padding: 0 12px;
+}
+
+.integration-card__actions button:hover,
+.integration-card__actions button:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.integration-card__actions button:disabled {
+  color: #454c58;
+  cursor: wait;
+}
+
+.integration-card__status {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px !important;
+  padding-top: 12px;
 }
 
 .todo-list {

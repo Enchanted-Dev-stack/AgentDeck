@@ -9,12 +9,14 @@
     "check": "pnpm typecheck",
     "dev": "electron-vite dev",
     "lint": "tsc --noEmit",
+    "predev": "corepack pnpm --filter @agentdeck/core build && corepack pnpm --filter @agentdeck/mcp-server build",
     "preview": "electron-vite preview",
     "test": "vitest run --config vitest.config.ts --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@agentdeck/core": "workspace:*",
+    "@agentdeck/mcp-server": "workspace:*",
     "@agentdeck/terminal": "workspace:*",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/outfit": "^5.2.8",

@@ -1,10 +1,10 @@
 import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
-import { getTerminalBridge, getWorkspaceBridge } from "../terminal/bridge.js";
+import { getMcpBridge, getTerminalBridge, getWorkspaceBridge, type McpActionResult, type McpClient } from "../terminal/bridge.js";
 import { createWorkspaceDocument } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 import { TerminalEmulator } from "./TerminalEmulator.js";
 
-type Page = "terminal" | "docs" | "todos" | "memory";
+type Page = "terminal" | "docs" | "todos" | "memory" | "integrations";
 type SplitDirection = "row" | "column";
 type TerminalSide = "left" | "right" | "top" | "bottom";
 type SplitNode = TerminalNode | SplitGroup;
@@ -65,6 +65,21 @@ const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
   { id: "docs", label: "Docs", icon: "note" },
   { id: "todos", label: "Todos", icon: "task" },
   { id: "memory", label: "Memory", icon: "brain" },
+];
+
+const mcpClients: Array<{ id: McpClient; label: string; description: string; configFile: string }> = [
+  {
+    id: "opencode",
+    label: "OpenCode",
+    description: "Project-level local MCP entry in opencode.json.",
+    configFile: "opencode.json",
+  },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    description: "Project-scoped stdio MCP entry in .mcp.json.",
+    configFile: ".mcp.json",
+  },
 ];
 
 const initialTerminalPanes: Record<string, TerminalPane> = {
@@ -134,6 +149,14 @@ export function App() {
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [selectedTerminalIds, setSelectedTerminalIds] = useState<Set<string>>(new Set());
+  const [mcpMessages, setMcpMessages] = useState<Record<McpClient, string>>({
+    "claude-code": "Choose a project folder to install or repair Claude Code MCP config.",
+    opencode: "Choose a project folder to install or repair OpenCode MCP config.",
+  });
+  const [pendingMcpClients, setPendingMcpClients] = useState<Record<McpClient, boolean>>({
+    "claude-code": false,
+    opencode: false,
+  });
   const [workspaceName, setWorkspaceName] = useState("AgentDeck Workspace");
   const [terminalState, setTerminalState] = useState({
     activeTabId: "tab-1",
@@ -349,6 +372,25 @@ export function App() {
     setActivePage("terminal");
   }
 
+  async function runMcpAction(client: McpClient, action: "copy" | "install" | "uninstall") {
+    const bridge = getMcpBridge();
+    if (!bridge) {
+      setMcpMessages((messages) => ({ ...messages, [client]: "AgentDeck MCP installer is available only in the Electron desktop app." }));
+      return;
+    }
+
+    setPendingMcpClients((clients) => ({ ...clients, [client]: true }));
+
+    try {
+      const result = await runMcpBridgeAction(bridge, client, action);
+      setMcpMessages((messages) => ({ ...messages, [client]: formatMcpResult(result) }));
+    } catch (error) {
+      setMcpMessages((messages) => ({ ...messages, [client]: error instanceof Error ? error.message : "MCP action failed." }));
+    } finally {
+      setPendingMcpClients((clients) => ({ ...clients, [client]: false }));
+    }
+  }
+
   function updateLayout(layout: SplitNode) {
     setTerminalState((currentState) => ({
       ...currentState,
@@ -413,7 +455,7 @@ export function App() {
           <button aria-label="Import workspace" className="sidebar__button" onClick={importWorkspace} title="Import workspace" type="button">
             <AgentDeckIcon name="folder" size={18} />
           </button>
-          <button aria-label="Export workspace" className="sidebar__button" onClick={saveWorkspace} title="Export workspace" type="button">
+          <button aria-label="MCP Integrations" aria-pressed={activePage === "integrations"} className="sidebar__button" onClick={() => setActivePage("integrations")} title="MCP Integrations" type="button">
             <AgentDeckIcon name="settings" size={18} />
           </button>
         </div>
@@ -448,11 +490,35 @@ export function App() {
             })}
           </div>
         </section>
-        {activePage !== "terminal" ? <ResourcePage page={activePage} /> : null}
+        {activePage !== "terminal" ? <ResourcePage mcpMessages={mcpMessages} onMcpAction={runMcpAction} page={activePage} pendingMcpClients={pendingMcpClients} /> : null}
       </section>
       {renameDialog ? <RenameDialog dialog={renameDialog} onCancel={() => setRenameDialog(null)} onChange={updateRenameValue} onSubmit={submitRename} /> : null}
     </main>
   );
+}
+
+async function runMcpBridgeAction(bridge: NonNullable<ReturnType<typeof getMcpBridge>>, client: McpClient, action: "copy" | "install" | "uninstall") {
+  switch (action) {
+    case "copy":
+      return bridge.copyConfig(client);
+    case "install":
+      return bridge.install(client);
+    case "uninstall":
+      return bridge.uninstall(client);
+  }
+}
+
+function formatMcpResult(result: McpActionResult): string {
+  const details = [result.message];
+  if (result.configPath) {
+    details.push(`Config: ${result.configPath}`);
+  }
+
+  if (result.backupPath) {
+    details.push(`Backup: ${result.backupPath}`);
+  }
+
+  return details.join(" ");
 }
 
 function RenameDialog({ dialog, onCancel, onChange, onSubmit }: { dialog: RenameDialogState; onCancel: () => void; onChange: (value: string) => void; onSubmit: () => void }) {
@@ -1179,7 +1245,7 @@ function getSubtreeMinPixels(node: SplitNode | undefined, dimension: "width" | "
   return Math.max(...node.children.map((child) => getSubtreeMinPixels(child, dimension)));
 }
 
-function ResourcePage({ page }: { page: Exclude<Page, "terminal"> }) {
+function ResourcePage({ mcpMessages, onMcpAction, page, pendingMcpClients }: { mcpMessages: Record<McpClient, string>; onMcpAction: (client: McpClient, action: "copy" | "install" | "uninstall") => void; page: Exclude<Page, "terminal">; pendingMcpClients: Record<McpClient, boolean> }) {
   if (page === "docs") {
     return (
       <section className="resource-page" aria-label="Docs">
@@ -1209,6 +1275,42 @@ function ResourcePage({ page }: { page: Exclude<Page, "terminal"> }) {
             </li>
           ))}
         </ol>
+      </section>
+    );
+  }
+
+  if (page === "integrations") {
+    return (
+      <section className="resource-page" aria-label="MCP Integrations">
+        <ResourceHeader icon="server" label="MCP Integrations" description="Install AgentDeck's local stdio MCP into project-level agent configs so OpenCode and Claude Code can discover shared context tools." />
+        <div className="integration-grid">
+          {mcpClients.map((client) => (
+            <article className="integration-card" key={client.id}>
+              <div className="integration-card__header">
+                <span>{client.configFile}</span>
+                <h2>{client.label}</h2>
+                <p>{client.description}</p>
+              </div>
+              <div className="integration-card__actions">
+                <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "install")} type="button">
+                  Install
+                </button>
+                <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "install")} type="button">
+                  Repair
+                </button>
+                <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "uninstall")} type="button">
+                  Uninstall
+                </button>
+                <button disabled={pendingMcpClients[client.id]} onClick={() => onMcpAction(client.id, "copy")} type="button">
+                  Copy Config
+                </button>
+              </div>
+              <p className="integration-card__status" role="status">
+                {mcpMessages[client.id]}
+              </p>
+            </article>
+          ))}
+        </div>
       </section>
     );
   }

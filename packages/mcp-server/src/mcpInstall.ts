@@ -1,5 +1,5 @@
-import { copyFile, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { copyFile, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 
 export type McpClient = "opencode" | "claude-code";
 
@@ -11,6 +11,7 @@ export interface AgentDeckServerSpec {
 
 export interface BuildServerSpecInput {
   command: string;
+  commandArgs?: string[] | undefined;
   stateFilePath: string;
 }
 
@@ -34,7 +35,7 @@ export function buildAgentDeckServerSpec(
   return {
     name: "agentdeck",
     command: input.command,
-    args: ["--state-file", input.stateFilePath],
+    args: [...(input.commandArgs ?? []), "--state-file", input.stateFilePath],
   };
 }
 
@@ -203,6 +204,8 @@ function withOptionalObject(
 }
 
 async function assertSafeConfigTarget(filePath: string): Promise<void> {
+  await assertSafeParentDirectory(dirname(filePath));
+
   try {
     const stats = await lstat(filePath);
     if (stats.isSymbolicLink()) {
@@ -213,6 +216,27 @@ async function assertSafeConfigTarget(filePath: string): Promise<void> {
 
     if (!stats.isFile()) {
       throw new Error(`MCP client config path is not a file: ${filePath}`);
+    }
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function assertSafeParentDirectory(directoryPath: string): Promise<void> {
+  try {
+    const stats = await lstat(directoryPath);
+    if (stats.isSymbolicLink()) {
+      throw new Error(
+        `Refusing to modify MCP client config in symlinked directory: ${directoryPath}`,
+      );
+    }
+
+    if (!stats.isDirectory()) {
+      throw new Error(`MCP client config parent is not a directory: ${directoryPath}`);
     }
   } catch (error) {
     if (isFileNotFoundError(error)) {
@@ -236,7 +260,9 @@ async function readJsonIfExists(filePath: string): Promise<unknown> {
 }
 
 async function writeJson(filePath: string, data: unknown): Promise<void> {
-  await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  const tempPath = join(dirname(filePath), `.agentdeck-${basename(filePath)}-${process.pid}-${Date.now()}.tmp`);
+  await writeFile(tempPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  await rename(tempPath, filePath);
 }
 
 function stableJson(data: unknown): string {
