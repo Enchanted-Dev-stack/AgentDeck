@@ -126,13 +126,14 @@ describe("App", () => {
   });
 
   test("renames a terminal from the context menu", () => {
-    const prompt = vi.spyOn(window, "prompt").mockReturnValue("Builder");
     render(<App />);
 
     fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
-    expect(prompt).toHaveBeenCalledWith("Rename terminal", "OpenCode");
+    fireEvent.change(screen.getByRole("textbox", { name: "Rename terminal" }), { target: { value: "Builder" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
     expect(screen.getByLabelText("Builder terminal")).toBeTruthy();
   });
 
@@ -203,12 +204,13 @@ describe("App", () => {
   });
 
   test("renames a terminal tab", () => {
-    const prompt = vi.spyOn(window, "prompt").mockReturnValue("Build");
     render(<App />);
 
     fireEvent.doubleClick(screen.getByRole("tab", { name: /Main/ }));
 
-    expect(prompt).toHaveBeenCalledWith("Rename tab", "Main");
+    fireEvent.change(screen.getByRole("textbox", { name: "Rename tab" }), { target: { value: "Build" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
     expect(screen.getByRole("tab", { name: /Build/ })).toBeTruthy();
   });
 

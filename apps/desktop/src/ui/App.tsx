@@ -1,4 +1,4 @@
-import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { getTerminalBridge, getWorkspaceBridge } from "../terminal/bridge.js";
 import { createWorkspaceDocument } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
@@ -47,6 +47,13 @@ interface ContextMenuState {
 interface MenuPosition {
   x: number;
   y: number;
+}
+
+interface RenameDialogState {
+  id: string;
+  kind: "tab" | "terminal";
+  title: string;
+  value: string;
 }
 
 const MIN_PANE_WIDTH = 220;
@@ -124,6 +131,7 @@ const memories = [
 export function App() {
   const [activePage, setActivePage] = useState<Page>("terminal");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [selectedTerminalIds, setSelectedTerminalIds] = useState<Set<string>>(new Set());
   const [workspaceName, setWorkspaceName] = useState("AgentDeck Workspace");
@@ -190,30 +198,8 @@ export function App() {
 
   function renameTerminal(terminalId: string) {
     const currentTitle = activeTab.panes[terminalId]?.title ?? terminalId;
-    const nextTitle = window.prompt("Rename terminal", currentTitle)?.trim().slice(0, MAX_PANE_TITLE_LENGTH);
-    if (!nextTitle) {
-      setContextMenu(null);
-      return;
-    }
-
-    setTerminalState((currentState) => ({
-      ...currentState,
-      tabs: currentState.tabs.map((tab) =>
-        tab.id === currentState.activeTabId
-          ? {
-              ...tab,
-              panes: {
-                ...tab.panes,
-                [terminalId]: {
-                  ...(tab.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex)),
-                  title: nextTitle,
-                },
-              },
-            }
-          : tab,
-      ),
-    }));
     setContextMenu(null);
+    setRenameDialog({ id: terminalId, kind: "terminal", title: "Rename terminal", value: currentTitle });
   }
 
   function addTab() {
@@ -271,15 +257,52 @@ export function App() {
 
   function renameTab(tabId: string) {
     const currentTitle = terminalState.tabs.find((tab) => tab.id === tabId)?.title ?? tabId;
-    const nextTitle = window.prompt("Rename tab", currentTitle)?.trim().slice(0, MAX_PANE_TITLE_LENGTH);
-    if (!nextTitle) {
+    setRenameDialog({ id: tabId, kind: "tab", title: "Rename tab", value: currentTitle });
+  }
+
+  function updateRenameValue(value: string) {
+    setRenameDialog((currentDialog) => (currentDialog ? { ...currentDialog, value: value.slice(0, MAX_PANE_TITLE_LENGTH) } : currentDialog));
+  }
+
+  function submitRename() {
+    if (!renameDialog) {
       return;
     }
 
-    setTerminalState((currentState) => ({
-      ...currentState,
-      tabs: currentState.tabs.map((tab) => (tab.id === tabId ? { ...tab, title: nextTitle } : tab)),
-    }));
+    const nextTitle = renameDialog.value.trim().slice(0, MAX_PANE_TITLE_LENGTH);
+    if (!nextTitle) {
+      setRenameDialog(null);
+      return;
+    }
+
+    if (renameDialog.kind === "tab") {
+      const tabId = renameDialog.id;
+      setTerminalState((currentState) => ({
+        ...currentState,
+        tabs: currentState.tabs.map((tab) => (tab.id === tabId ? { ...tab, title: nextTitle } : tab)),
+      }));
+    } else {
+      const terminalId = renameDialog.id;
+      setTerminalState((currentState) => ({
+        ...currentState,
+        tabs: currentState.tabs.map((tab) =>
+          tab.id === currentState.activeTabId
+            ? {
+                ...tab,
+                panes: {
+                  ...tab.panes,
+                  [terminalId]: {
+                    ...(tab.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex)),
+                    title: nextTitle,
+                  },
+                },
+              }
+            : tab,
+        ),
+      }));
+    }
+
+    setRenameDialog(null);
   }
 
   function selectTab(tabId: string) {
@@ -427,7 +450,39 @@ export function App() {
         </section>
         {activePage !== "terminal" ? <ResourcePage page={activePage} /> : null}
       </section>
+      {renameDialog ? <RenameDialog dialog={renameDialog} onCancel={() => setRenameDialog(null)} onChange={updateRenameValue} onSubmit={submitRename} /> : null}
     </main>
+  );
+}
+
+function RenameDialog({ dialog, onCancel, onChange, onSubmit }: { dialog: RenameDialogState; onCancel: () => void; onChange: (value: string) => void; onSubmit: () => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  function submitForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit();
+  }
+
+  return (
+    <div className="rename-dialog-backdrop" role="presentation" onMouseDown={onCancel}>
+      <form aria-label={dialog.title} className="rename-dialog" onMouseDown={(event) => event.stopPropagation()} onSubmit={submitForm}>
+        <label className="rename-dialog__label" htmlFor="rename-dialog-input">
+          {dialog.title}
+        </label>
+        <input id="rename-dialog-input" maxLength={MAX_PANE_TITLE_LENGTH} onChange={(event) => onChange(event.target.value)} ref={inputRef} value={dialog.value} />
+        <div className="rename-dialog__actions">
+          <button onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
   );
 }
 

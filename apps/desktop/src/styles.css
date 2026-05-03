@@ -266,6 +266,71 @@ button {
   overflow: hidden;
 }
 
+.rename-dialog-backdrop {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.46);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 40;
+}
+
+.rename-dialog {
+  background: #11161d;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.44);
+  display: grid;
+  gap: 12px;
+  min-width: 320px;
+  padding: 16px;
+}
+
+.rename-dialog__label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rename-dialog input {
+  background: #07090d;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  height: 36px;
+  outline: none;
+  padding: 0 10px;
+}
+
+.rename-dialog input:focus {
+  border-color: var(--accent);
+}
+
+.rename-dialog__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.rename-dialog__actions button {
+  background: #1a2029;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  height: 32px;
+  padding: 0 12px;
+}
+
+.rename-dialog__actions button:hover,
+.rename-dialog__actions button:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
 .terminal-workspace {
   background: var(--surface);
   height: 100%;
