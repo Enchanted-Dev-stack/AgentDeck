@@ -14,6 +14,7 @@ import { mcpChannels, settingsChannels, sharedStateChannels, terminalChannels, w
 import { parseWorkspaceDocument } from "../workspace/schema.js";
 
 const MAX_TERMINAL_ID_LENGTH = 80;
+const MAX_TERMINAL_COPY_LENGTH = 1_000_000;
 const MAX_TERMINAL_PASTE_LENGTH = 1_000_000;
 const MAX_TERMINAL_WRITE_LENGTH = 16_384;
 const MAX_WORKSPACE_FILE_BYTES = 1_000_000;
@@ -110,6 +111,16 @@ function registerTerminalIpc() {
     }
 
     return terminalHost.write(id, dataPayload);
+  });
+  ipcMain.handle(terminalChannels.copySelection, (event, idPayload: unknown, textPayload: unknown) => {
+    const id = parseTerminalId(idPayload);
+    if (!id || !isTrustedSessionOwner(event, id) || typeof textPayload !== "string" || !textPayload || textPayload.length > MAX_TERMINAL_COPY_LENGTH) {
+      return false;
+    }
+
+    // The renderer owns xterm selection state; gate clipboard writes by trusted origin, session ownership, and size.
+    clipboard.writeText(textPayload);
+    return true;
   });
   ipcMain.handle(terminalChannels.paste, (event, idPayload: unknown) => {
     const id = parseTerminalId(idPayload);

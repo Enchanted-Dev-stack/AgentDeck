@@ -1,11 +1,13 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { isTerminalPasteShortcut } from "./terminalShortcuts.js";
+import { isTerminalCopyShortcut, isTerminalPasteShortcut } from "./terminalShortcuts.js";
 
 const fitMock = vi.fn();
 const contextLossDisposeMock = vi.fn();
 const terminalDisposeMock = vi.fn();
 const terminalFocusMock = vi.fn();
+const terminalGetSelectionMock = vi.fn(() => "");
+const terminalHasSelectionMock = vi.fn(() => false);
 const terminalLoadAddonMock = vi.fn();
 const terminalWriteMock = vi.fn();
 const webglDisposeMock = vi.fn();
@@ -36,6 +38,8 @@ vi.mock("@xterm/xterm", () => ({
       cols: 80,
       dispose: terminalDisposeMock,
       focus: terminalFocusMock,
+      getSelection: terminalGetSelectionMock,
+      hasSelection: terminalHasSelectionMock,
       loadAddon: terminalLoadAddonMock,
       onData: vi.fn(() => ({ dispose: vi.fn() })),
       open: vi.fn(),
@@ -57,6 +61,8 @@ describe("TerminalEmulator", () => {
     customKeyHandler = undefined;
     contextLossHandler = undefined;
     terminalOptionsUpdates = [];
+    terminalGetSelectionMock.mockReturnValue("");
+    terminalHasSelectionMock.mockReturnValue(false);
     window.agentDeck = createFakeBridge();
   });
 
@@ -67,6 +73,9 @@ describe("TerminalEmulator", () => {
   });
 
   test("detects terminal paste shortcuts", () => {
+    expect(isTerminalCopyShortcut({ ctrlKey: true, key: "c", metaKey: false })).toBe(true);
+    expect(isTerminalCopyShortcut({ ctrlKey: false, key: "C", metaKey: true })).toBe(true);
+    expect(isTerminalCopyShortcut({ ctrlKey: false, key: "c", metaKey: false })).toBe(false);
     expect(isTerminalPasteShortcut({ ctrlKey: true, key: "v", metaKey: false, shiftKey: false })).toBe(true);
     expect(isTerminalPasteShortcut({ ctrlKey: false, key: "V", metaKey: true, shiftKey: false })).toBe(true);
     expect(isTerminalPasteShortcut({ ctrlKey: false, key: "Insert", metaKey: false, shiftKey: true })).toBe(true);
@@ -86,6 +95,36 @@ describe("TerminalEmulator", () => {
     expect(handled).toBe(false);
     expect(paste).toHaveBeenCalledWith("term-1");
     expect(write).not.toHaveBeenCalled();
+  });
+
+  test("copies terminal selection through the terminal copy bridge", async () => {
+    const copySelection = vi.fn(() => Promise.resolve(true));
+    const write = vi.fn(() => Promise.resolve(true));
+    terminalHasSelectionMock.mockReturnValue(true);
+    terminalGetSelectionMock.mockReturnValue("selected terminal text");
+    window.agentDeck = createFakeBridge({ copySelection, write });
+
+    render(<TerminalEmulator cwd="" onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    const handled = customKeyHandler?.(new KeyboardEvent("keydown", { ctrlKey: true, key: "c" }));
+
+    expect(handled).toBe(false);
+    expect(copySelection).toHaveBeenCalledWith("term-1", "selected terminal text");
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  test("lets Ctrl+C reach the shell when there is no terminal selection", async () => {
+    const copySelection = vi.fn(() => Promise.resolve(true));
+    window.agentDeck = createFakeBridge({ copySelection });
+
+    render(<TerminalEmulator cwd="" onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    const handled = customKeyHandler?.(new KeyboardEvent("keydown", { ctrlKey: true, key: "c" }));
+
+    expect(handled).toBe(true);
+    expect(copySelection).not.toHaveBeenCalled();
   });
 
   test("routes DOM paste events through the terminal paste bridge", async () => {
@@ -170,6 +209,7 @@ function createFakeBridge(terminalOverrides: Partial<NonNullable<Window["agentDe
     },
     terminal: {
       closeSession: () => Promise.resolve(true),
+      copySelection: () => Promise.resolve(true),
       createSession: vi.fn(() => Promise.resolve(true)),
       onCwd: () => () => undefined,
       onData: () => () => undefined,

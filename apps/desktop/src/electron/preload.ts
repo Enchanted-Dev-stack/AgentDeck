@@ -37,6 +37,7 @@ const bridge: AgentDeckBridge = {
   },
   terminal: {
     closeSession: (id: string) => ipcRenderer.invoke(terminalChannels.close, id) as Promise<boolean>,
+    copySelection: (id: string, text: string) => ipcRenderer.invoke(terminalChannels.copySelection, id, text) as Promise<boolean>,
     createSession: (request: TerminalCreateRequest) => ipcRenderer.invoke(terminalChannels.create, request) as Promise<boolean>,
     onCwd: (listener: (event: TerminalCwdEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: TerminalCwdEvent) => listener(payload);

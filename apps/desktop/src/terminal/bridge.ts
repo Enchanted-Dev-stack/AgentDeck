@@ -4,6 +4,7 @@ import type { WorkspaceDocument } from "../workspace/schema.js";
 
 export const terminalChannels = {
   close: "terminal:close",
+  copySelection: "terminal:copy-selection",
   create: "terminal:create",
   cwd: "terminal:cwd",
   data: "terminal:data",
@@ -89,6 +90,7 @@ export interface TerminalCwdEvent {
 
 export interface TerminalBridge {
   closeSession: (id: string) => Promise<boolean>;
+  copySelection: (id: string, text: string) => Promise<boolean>;
   createSession: (request: TerminalCreateRequest) => Promise<boolean>;
   onCwd: (listener: (event: TerminalCwdEvent) => void) => () => void;
   onData: (listener: (event: TerminalDataEvent) => void) => () => void;

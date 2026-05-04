@@ -978,6 +978,7 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
     shared: shared ?? createFakeSharedBridge(),
     terminal: {
       closeSession: () => Promise.resolve(true),
+      copySelection: () => Promise.resolve(true),
       createSession: () => Promise.resolve(true),
       onCwd: () => () => undefined,
       onData: () => () => undefined,
