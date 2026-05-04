@@ -66,7 +66,19 @@ const CONTEXT_MENU_MARGIN = 8;
 const ESTIMATED_CONTEXT_MENU_WIDTH = 190;
 const ESTIMATED_CONTEXT_MENU_HEIGHT = 236;
 const defaultAppSettings: AppSettings = { sharedContextEnabled: true };
-const defaultTerminalAppearance: WorkspaceTerminalAppearance = { borders: true, dividers: true, shape: "rounded", spacing: "comfort" };
+const defaultTerminalAppearance: WorkspaceTerminalAppearance = { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" };
+const terminalFontFamilies: Record<WorkspaceTerminalAppearance["font"], string> = {
+  cascadia: "Cascadia Mono, JetBrains Mono, Consolas, monospace",
+  consolas: "Consolas, Cascadia Mono, JetBrains Mono, monospace",
+  jetbrains: "JetBrains Mono, Cascadia Mono, Consolas, monospace",
+  system: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+};
+const terminalFontOptions: Array<{ label: string; value: WorkspaceTerminalAppearance["font"] }> = [
+  { label: "JetBrains", value: "jetbrains" },
+  { label: "Cascadia", value: "cascadia" },
+  { label: "Consolas", value: "consolas" },
+  { label: "System", value: "system" },
+];
 const terminalShapeOptions: Array<{ label: string; value: WorkspaceTerminalAppearance["shape"] }> = [
   { label: "Rounded", value: "rounded" },
   { label: "Boxy", value: "boxy" },
@@ -835,7 +847,7 @@ function TerminalWorkspace({
   panes: Record<string, TerminalPane>;
   selectedTerminalIds: Set<string>;
 }) {
-  const appearanceClassName = `terminal-workspace terminal-workspace--${appearance.shape} terminal-workspace--spacing-${appearance.spacing} ${appearance.borders ? "terminal-workspace--borders" : "terminal-workspace--no-borders"} ${appearance.dividers ? "terminal-workspace--dividers" : "terminal-workspace--no-dividers"}`;
+  const appearanceClassName = `terminal-workspace terminal-workspace--${appearance.shape} terminal-workspace--font-${appearance.font} terminal-workspace--spacing-${appearance.spacing} ${appearance.borders ? "terminal-workspace--borders" : "terminal-workspace--no-borders"} ${appearance.dividers ? "terminal-workspace--dividers" : "terminal-workspace--no-dividers"}`;
 
   if (!layout) {
     return (
@@ -863,6 +875,7 @@ function TerminalWorkspace({
     >
       <SplitView
         node={layout}
+        appearance={appearance}
         onOpenTerminalMenu={onOpenTerminalMenu}
         onSelectTerminal={onSelectTerminal}
         panes={panes}
@@ -890,6 +903,16 @@ function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onToggle, on
     <div className="terminal-appearance" onClick={(event) => event.stopPropagation()}>
       {isOpen ? (
         <div aria-label="Terminal appearance" className="terminal-appearance__panel" onKeyDown={handlePanelKeyDown}>
+          <fieldset>
+            <legend className="terminal-appearance__label">Font</legend>
+            <div className="terminal-appearance__options terminal-appearance__options--font">
+              {terminalFontOptions.map((option) => (
+                <button aria-pressed={appearance.font === option.value} key={option.value} onClick={() => onUpdateAppearance({ font: option.value })} type="button">
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
           <fieldset>
             <legend className="terminal-appearance__label">Edges</legend>
             <div className="terminal-appearance__options">
@@ -942,6 +965,7 @@ function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onToggle, on
 }
 
 function SplitView({
+  appearance,
   node,
   onLayoutChange,
   onOpenTerminalMenu,
@@ -950,6 +974,7 @@ function SplitView({
   rootLayout,
   selectedTerminalIds,
 }: {
+  appearance: WorkspaceTerminalAppearance;
   node: SplitNode;
   onLayoutChange: (layout: SplitNode) => void;
   onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
@@ -959,14 +984,14 @@ function SplitView({
   selectedTerminalIds: Set<string>;
 }) {
   if (node.type === "terminal") {
-    return <TerminalPaneView isSelected={selectedTerminalIds.has(node.id)} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
+    return <TerminalPaneView fontFamily={terminalFontFamilies[appearance.font]} isSelected={selectedTerminalIds.has(node.id)} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
   }
 
   return (
     <div className={`split split--${node.direction}`} data-split-id={node.id}>
       {node.children.map((child, index) => (
         <div className="split__child" key={getNodeKey(child)} style={getChildStyle(node, child, index)}>
-          <SplitView node={child} onLayoutChange={onLayoutChange} onOpenTerminalMenu={onOpenTerminalMenu} onSelectTerminal={onSelectTerminal} panes={panes} rootLayout={rootLayout} selectedTerminalIds={selectedTerminalIds} />
+          <SplitView appearance={appearance} node={child} onLayoutChange={onLayoutChange} onOpenTerminalMenu={onOpenTerminalMenu} onSelectTerminal={onSelectTerminal} panes={panes} rootLayout={rootLayout} selectedTerminalIds={selectedTerminalIds} />
           {index < node.children.length - 1 ? <ResizeSash direction={node.direction} group={node} index={index} onLayoutChange={onLayoutChange} rootLayout={rootLayout} /> : null}
         </div>
       ))}
@@ -1058,7 +1083,7 @@ function ResizeSash({
   );
 }
 
-function TerminalPaneView({ isSelected, onOpenMenu, onSelect, pane }: { isSelected: boolean; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
+function TerminalPaneView({ fontFamily, isSelected, onOpenMenu, onSelect, pane }: { fontFamily: string; isSelected: boolean; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
   if (!pane) {
     return null;
   }
@@ -1106,7 +1131,7 @@ function TerminalPaneView({ isSelected, onOpenMenu, onSelect, pane }: { isSelect
         </span>
       </header>
       <div className="terminal-pane__body">
-        <TerminalEmulator paneId={terminalPane.id} />
+        <TerminalEmulator fontFamily={fontFamily} paneId={terminalPane.id} />
       </div>
     </article>
   );

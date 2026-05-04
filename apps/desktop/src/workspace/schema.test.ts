@@ -28,7 +28,7 @@ const validDocument: WorkspaceDocument = {
   name: "BridgeMind",
   nextTabIndex: 2,
   nextTerminalIndex: 2,
-  settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, shape: "rounded", spacing: "comfort" } },
+  settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } },
   tabs: [tab],
   version: 3,
 };
@@ -58,19 +58,19 @@ describe("workspace schema", () => {
   test("preserves workspace shared context settings", () => {
     expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: false } })).toEqual({
       ...validDocument,
-      settings: { sharedContextEnabled: false, terminalAppearance: { borders: true, dividers: true, shape: "rounded", spacing: "comfort" } },
+      settings: { sharedContextEnabled: false, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } },
     });
   });
 
   test("preserves terminal appearance settings", () => {
-    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, shape: "boxy", spacing: "roomy" } } })).toEqual({
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } } })).toEqual({
       ...validDocument,
-      settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, shape: "boxy", spacing: "roomy" } },
+      settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } },
     });
   });
 
   test("defaults invalid terminal appearance settings", () => {
-    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { shape: "soft", spacing: "wide" } } })).toEqual(validDocument);
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { font: "comic", shape: "soft", spacing: "wide" } } })).toEqual(validDocument);
   });
 
   test("rejects unknown workspace versions", () => {

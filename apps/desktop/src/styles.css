@@ -502,9 +502,7 @@ button {
 }
 
 .terminal-workspace {
-  background:
-    radial-gradient(circle at 0 0, rgba(201, 168, 106, 0.07), transparent 28%),
-    linear-gradient(135deg, #070a0f 0%, var(--surface) 48%, #07090d 100%);
+  background: var(--terminal-body);
   height: 100%;
   overflow: auto;
   position: relative;
@@ -519,6 +517,22 @@ button {
 
 .terminal-workspace--rounded {
   --terminal-pane-radius: 10px;
+}
+
+.terminal-workspace--font-cascadia {
+  --terminal-font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+}
+
+.terminal-workspace--font-consolas {
+  --terminal-font-family: Consolas, "Cascadia Mono", "JetBrains Mono", monospace;
+}
+
+.terminal-workspace--font-jetbrains {
+  --terminal-font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
+
+.terminal-workspace--font-system {
+  --terminal-font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 .terminal-workspace--spacing-compact {
@@ -646,7 +660,7 @@ button {
   align-items: center;
   color: #d8dce2;
   display: inline-flex;
-  font-family: var(--font-mono);
+  font-family: var(--terminal-font-family, var(--font-mono));
   font-size: 11px;
   font-weight: 600;
   gap: 7px;
@@ -664,7 +678,7 @@ button {
   border-radius: 999px;
   color: var(--muted);
   display: inline-flex;
-  font-family: var(--font-mono);
+  font-family: var(--terminal-font-family, var(--font-mono));
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   gap: 5px;
@@ -737,6 +751,7 @@ button {
 }
 
 .terminal-pane__body {
+  background: var(--terminal-body);
   color: #aab2bd;
   min-height: 0;
   overflow: hidden;
@@ -744,6 +759,7 @@ button {
 }
 
 .terminal-emulator {
+  background: var(--terminal-body);
   height: 100%;
   line-height: normal;
   min-height: 0;
@@ -753,7 +769,13 @@ button {
 }
 
 .terminal-emulator .xterm {
+  background: var(--terminal-body);
   height: 100%;
+}
+
+.terminal-emulator .xterm-screen,
+.terminal-emulator .xterm-viewport {
+  background: var(--terminal-body) !important;
 }
 
 .terminal-emulator .xterm-viewport,
@@ -936,6 +958,11 @@ button {
   grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column;
   padding: 3px;
+}
+
+.terminal-appearance__options--font {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .terminal-appearance__options button {

@@ -3,9 +3,9 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { getTerminalBridge } from "../terminal/bridge.js";
 
-const TERMINAL_FONT_FAMILY = "Cascadia Mono, Consolas, JetBrains Mono, monospace";
+const DEFAULT_TERMINAL_FONT_FAMILY = "JetBrains Mono, Cascadia Mono, Consolas, monospace";
 
-export function TerminalEmulator({ paneId }: { paneId: string }) {
+export function TerminalEmulator({ fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, paneId }: { fontFamily?: string; paneId: string }) {
   const terminalElementRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -23,12 +23,12 @@ export function TerminalEmulator({ paneId }: { paneId: string }) {
       allowProposedApi: false,
       customGlyphs: true,
       cursorBlink: true,
-      fontFamily: TERMINAL_FONT_FAMILY,
+      fontFamily,
       fontSize: 12,
       letterSpacing: 0,
       lineHeight: 1,
       theme: {
-        background: "#07090d",
+        background: "#05070a",
         cursor: "#7dd3fc",
         foreground: "#d8dce2",
         selectionBackground: "#25435a",
@@ -100,7 +100,7 @@ export function TerminalEmulator({ paneId }: { paneId: string }) {
       inputDisposable.dispose();
       terminal.dispose();
     };
-  }, [paneId]);
+  }, [fontFamily, paneId]);
 
   if (!getTerminalBridge()) {
     return (

@@ -42,10 +42,12 @@ export interface WorkspaceSettings {
 export interface WorkspaceTerminalAppearance {
   borders: boolean;
   dividers: boolean;
+  font: WorkspaceTerminalFont;
   shape: WorkspaceTerminalShape;
   spacing: WorkspaceTerminalSpacing;
 }
 
+export type WorkspaceTerminalFont = "jetbrains" | "cascadia" | "consolas" | "system";
 export type WorkspaceTerminalShape = "rounded" | "boxy";
 export type WorkspaceTerminalSpacing = "compact" | "comfort" | "roomy";
 
@@ -73,7 +75,7 @@ export interface WorkspaceDocumentInput {
   tabs: WorkspaceTab[];
 }
 
-const DEFAULT_TERMINAL_APPEARANCE: WorkspaceTerminalAppearance = { borders: true, dividers: true, shape: "rounded", spacing: "comfort" };
+const DEFAULT_TERMINAL_APPEARANCE: WorkspaceTerminalAppearance = { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" };
 const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = { sharedContextEnabled: true, terminalAppearance: DEFAULT_TERMINAL_APPEARANCE };
 
 const MAX_WORKSPACE_ID_LENGTH = 80;
@@ -188,6 +190,7 @@ function parseTerminalAppearance(payload: unknown): WorkspaceTerminalAppearance 
   return {
     borders: typeof payload.borders === "boolean" ? payload.borders : DEFAULT_TERMINAL_APPEARANCE.borders,
     dividers: typeof payload.dividers === "boolean" ? payload.dividers : DEFAULT_TERMINAL_APPEARANCE.dividers,
+    font: payload.font === "jetbrains" || payload.font === "cascadia" || payload.font === "consolas" || payload.font === "system" ? payload.font : DEFAULT_TERMINAL_APPEARANCE.font,
     shape: payload.shape === "boxy" || payload.shape === "rounded" ? payload.shape : DEFAULT_TERMINAL_APPEARANCE.shape,
     spacing: payload.spacing === "compact" || payload.spacing === "comfort" || payload.spacing === "roomy" ? payload.spacing : DEFAULT_TERMINAL_APPEARANCE.spacing,
   };

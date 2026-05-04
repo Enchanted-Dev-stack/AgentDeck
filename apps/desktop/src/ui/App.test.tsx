@@ -156,7 +156,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 5, settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, shape: "rounded", spacing: "comfort" } } });
+    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 5, settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } } });
     expect((savedDocuments[0] as { tabs: unknown[] }).tabs).toHaveLength(1);
   });
 
@@ -171,7 +171,7 @@ describe("App", () => {
             name: "Imported",
             nextTabIndex: 10,
             nextTerminalIndex: 10,
-            settings: { sharedContextEnabled: false, terminalAppearance: { borders: false, dividers: false, shape: "boxy", spacing: "roomy" } },
+            settings: { sharedContextEnabled: false, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } },
             tabs: [
               {
                 id: "tab-9",
@@ -196,6 +196,7 @@ describe("App", () => {
     expect(closeSession).toHaveBeenCalledWith("term-1");
     expect(closeSession).toHaveBeenCalledWith("term-4");
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--boxy");
+    expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--font-consolas");
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--spacing-roomy");
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--no-borders");
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--no-dividers");
@@ -212,12 +213,14 @@ describe("App", () => {
     expect(workspace.className).toContain("terminal-workspace--spacing-comfort");
 
     await user.click(screen.getByRole("button", { name: "Terminal appearance" }));
+    await user.click(screen.getByRole("button", { name: "Consolas" }));
     await user.click(screen.getByRole("button", { name: "Boxy" }));
     await user.click(screen.getByRole("button", { name: "Roomy" }));
     await user.click(screen.getByRole("button", { name: "No dividers" }));
     await user.click(screen.getByRole("button", { name: "No borders" }));
 
     expect(workspace.className).toContain("terminal-workspace--boxy");
+    expect(workspace.className).toContain("terminal-workspace--font-consolas");
     expect(workspace.className).toContain("terminal-workspace--spacing-roomy");
     expect(workspace.className).toContain("terminal-workspace--no-dividers");
     expect(workspace.className).toContain("terminal-workspace--no-borders");
@@ -234,6 +237,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Terminal appearance" }));
+    await user.click(screen.getByRole("button", { name: "Consolas" }));
     await user.click(screen.getByRole("button", { name: "Boxy" }));
     await user.click(screen.getByRole("button", { name: "Roomy" }));
     await user.click(screen.getByRole("button", { name: "No dividers" }));
@@ -241,7 +245,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ settings: { terminalAppearance: { borders: false, dividers: false, shape: "boxy", spacing: "roomy" } } });
+    expect(savedDocuments[0]).toMatchObject({ settings: { terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } } });
   });
 
   test("creates and switches terminal tabs", () => {
