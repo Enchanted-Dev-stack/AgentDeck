@@ -408,6 +408,17 @@ describe("App", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  test("does not intercept spaces typed inside terminal content", () => {
+    render(<App />);
+
+    const terminalContent = screen.getByTestId("terminal-emulator-term-1");
+    const spaceEvent = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: " " });
+
+    terminalContent.dispatchEvent(spaceEvent);
+
+    expect(spaceEvent.defaultPrevented).toBe(false);
+  });
+
   test("creates unique terminals across repeated adds", async () => {
     render(<App />);
 

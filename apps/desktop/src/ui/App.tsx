@@ -1197,6 +1197,10 @@ function TerminalPaneView({ fontFamily, isSelected, onCwdChange, onOpenMenu, onS
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
       onSelect(terminalPane.id, event.shiftKey);
