@@ -3,7 +3,7 @@ import type { Memory, MemoryType, Note, Priority, Todo, TodoStatus, Workspace } 
 import { getMcpBridge, getSettingsBridge, getSharedStateBridge, getTerminalBridge, getWorkspaceBridge, type AppSettings, type McpActionResult, type McpClient, type McpSetupStatus, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import { createWorkspaceDocument, type WorkspaceTerminalAppearance } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
-import { TerminalEmulator } from "./TerminalEmulator.js";
+import { requestTerminalRenderDiagnostic, TerminalEmulator, updateTerminalRenderOptions } from "./TerminalEmulator.js";
 
 type Page = "terminal" | "docs" | "todos" | "memory" | "integrations";
 type McpUiAction = "copy" | "copy-global-instructions" | "install" | "install-global-instructions" | "install-repo-instructions" | "uninstall";
@@ -1033,6 +1033,25 @@ function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onSelectTerm
                 No borders
               </button>
             </div>
+          </fieldset>
+          <fieldset>
+            <legend className="terminal-appearance__label">Diagnostics</legend>
+            <div className="terminal-appearance__options terminal-appearance__options--font">
+              <button onClick={() => updateTerminalRenderOptions({ customGlyphs: true })} type="button">
+                Glyphs on
+              </button>
+              <button onClick={() => updateTerminalRenderOptions({ customGlyphs: false })} type="button">
+                Glyphs off
+              </button>
+              {[11, 12, 13, 14].map((fontSize) => (
+                <button key={fontSize} onClick={() => updateTerminalRenderOptions({ fontSize })} type="button">
+                  {fontSize}px
+                </button>
+              ))}
+            </div>
+            <button className="terminal-appearance__action" onClick={() => requestTerminalRenderDiagnostic()} type="button">
+              Run render test
+            </button>
           </fieldset>
         </div>
       ) : null}

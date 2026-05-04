@@ -3,36 +3,60 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { isTerminalPasteShortcut } from "./terminalShortcuts.js";
 
 const fitMock = vi.fn();
+const contextLossDisposeMock = vi.fn();
 const terminalDisposeMock = vi.fn();
 const terminalFocusMock = vi.fn();
+const terminalLoadAddonMock = vi.fn();
+const terminalWriteMock = vi.fn();
+const webglDisposeMock = vi.fn();
+let terminalOptionsUpdates: unknown[] = [];
 let customKeyHandler: ((event: KeyboardEvent) => boolean) | undefined;
+let contextLossHandler: (() => void) | undefined;
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: vi.fn(() => ({ fit: fitMock })),
 }));
 
-vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn(() => ({
-    attachCustomKeyEventHandler: (handler: (event: KeyboardEvent) => boolean) => {
-      customKeyHandler = handler;
-    },
-    cols: 80,
-    dispose: terminalDisposeMock,
-    focus: terminalFocusMock,
-    loadAddon: vi.fn(),
-    onData: vi.fn(() => ({ dispose: vi.fn() })),
-    open: vi.fn(),
-    rows: 24,
-    write: vi.fn(),
-    writeln: vi.fn(),
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: vi.fn(() => ({
+    dispose: webglDisposeMock,
+    onContextLoss: vi.fn((handler: () => void) => {
+      contextLossHandler = handler;
+      return { dispose: contextLossDisposeMock };
+    }),
   })),
 }));
 
-import { TerminalEmulator } from "./TerminalEmulator.js";
+vi.mock("@xterm/xterm", () => ({
+  Terminal: vi.fn(() => {
+    const terminal = {
+      attachCustomKeyEventHandler: (handler: (event: KeyboardEvent) => boolean) => {
+        customKeyHandler = handler;
+      },
+      cols: 80,
+      dispose: terminalDisposeMock,
+      focus: terminalFocusMock,
+      loadAddon: terminalLoadAddonMock,
+      onData: vi.fn(() => ({ dispose: vi.fn() })),
+      open: vi.fn(),
+      rows: 24,
+      write: terminalWriteMock,
+      writeln: vi.fn(),
+    };
+    Object.defineProperty(terminal, "options", {
+      set: (options) => terminalOptionsUpdates.push(options),
+    });
+    return terminal;
+  }),
+}));
+
+import { requestTerminalRenderDiagnostic, TerminalEmulator, updateTerminalRenderOptions } from "./TerminalEmulator.js";
 
 describe("TerminalEmulator", () => {
   beforeEach(() => {
     customKeyHandler = undefined;
+    contextLossHandler = undefined;
+    terminalOptionsUpdates = [];
     window.agentDeck = createFakeBridge();
   });
 
@@ -78,6 +102,38 @@ describe("TerminalEmulator", () => {
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(paste).toHaveBeenCalledWith("term-1");
     expect(write).not.toHaveBeenCalled();
+  });
+
+  test("writes the direct xterm render diagnostic sample", async () => {
+    render(<TerminalEmulator cwd="" onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    requestTerminalRenderDiagnostic("term-1");
+
+    expect(terminalWriteMock).toHaveBeenCalledWith(expect.stringContaining("AgentDeck xterm render diagnostic"));
+    expect(terminalWriteMock).toHaveBeenCalledWith(expect.stringContaining("background cells"));
+  });
+
+  test("applies runtime render diagnostic options", async () => {
+    render(<TerminalEmulator cwd="" onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    updateTerminalRenderOptions({ customGlyphs: false, fontSize: 13, paneId: "term-1" });
+
+    expect(terminalOptionsUpdates).toContainEqual({ customGlyphs: false, fontSize: 13 });
+  });
+
+  test("cleans up the WebGL renderer listener and addon", async () => {
+    const { unmount } = render(<TerminalEmulator cwd="" onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    expect(terminalLoadAddonMock).toHaveBeenCalled();
+
+    contextLossHandler?.();
+    expect(webglDisposeMock).toHaveBeenCalled();
+
+    unmount();
+    expect(contextLossDisposeMock).toHaveBeenCalled();
   });
 });
 
