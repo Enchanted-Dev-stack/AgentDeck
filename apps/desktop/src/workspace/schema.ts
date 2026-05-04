@@ -17,6 +17,7 @@ export interface WorkspaceSplitGroup {
 
 export interface WorkspaceTerminalPane {
   command: string;
+  cwd: string;
   detail: string;
   id: string;
   status: string;
@@ -37,6 +38,7 @@ export interface WorkspaceDocument {
 export interface WorkspaceSettings {
   sharedContextEnabled: boolean;
   terminalAppearance: WorkspaceTerminalAppearance;
+  terminalDefaultCwd: string;
 }
 
 export interface WorkspaceTerminalAppearance {
@@ -76,7 +78,7 @@ export interface WorkspaceDocumentInput {
 }
 
 const DEFAULT_TERMINAL_APPEARANCE: WorkspaceTerminalAppearance = { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" };
-const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = { sharedContextEnabled: true, terminalAppearance: DEFAULT_TERMINAL_APPEARANCE };
+const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = { sharedContextEnabled: true, terminalAppearance: DEFAULT_TERMINAL_APPEARANCE, terminalDefaultCwd: "" };
 
 const MAX_WORKSPACE_ID_LENGTH = 80;
 const MAX_WORKSPACE_TABS = 24;
@@ -179,6 +181,7 @@ function parseWorkspaceSettings(payload: unknown): WorkspaceSettings {
   return {
     sharedContextEnabled: typeof payload.sharedContextEnabled === "boolean" ? payload.sharedContextEnabled : DEFAULT_WORKSPACE_SETTINGS.sharedContextEnabled,
     terminalAppearance: parseTerminalAppearance(payload.terminalAppearance),
+    terminalDefaultCwd: typeof payload.terminalDefaultCwd === "string" && payload.terminalDefaultCwd.length <= 4096 ? payload.terminalDefaultCwd : DEFAULT_WORKSPACE_SETTINGS.terminalDefaultCwd,
   };
 }
 
@@ -238,6 +241,7 @@ function parsePanes(payload: Record<string, unknown>) {
 
     panes[paneId] = {
       command: panePayload.command,
+      cwd: typeof panePayload.cwd === "string" && panePayload.cwd.length <= 4096 ? panePayload.cwd : "",
       detail: panePayload.detail,
       id: paneId,
       status: panePayload.status,

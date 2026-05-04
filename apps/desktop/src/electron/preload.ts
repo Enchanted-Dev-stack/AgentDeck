@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { mcpChannels, settingsChannels, sharedStateChannels, terminalChannels, workspaceChannels, type AgentDeckBridge, type AppSettings, type McpActionResult, type McpClient, type McpInstructionScope, type McpSetupStatus, type TerminalCreateRequest, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
 import type { CreateMemoryInput, CreateNoteInput, CreateTodoInput, Memory, Note, Todo, UpdateNoteInput, UpdateTodoInput, Workspace } from "@agentdeck/core";
 import type { TerminalDataEvent, TerminalExitEvent } from "@agentdeck/terminal";
+import type { TerminalCwdEvent } from "../terminal/bridge.js";
 import type { WorkspaceDocument } from "../workspace/schema.js";
 
 const bridge: AgentDeckBridge = {
@@ -37,6 +38,11 @@ const bridge: AgentDeckBridge = {
   terminal: {
     closeSession: (id: string) => ipcRenderer.invoke(terminalChannels.close, id) as Promise<boolean>,
     createSession: (request: TerminalCreateRequest) => ipcRenderer.invoke(terminalChannels.create, request) as Promise<boolean>,
+    onCwd: (listener: (event: TerminalCwdEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: TerminalCwdEvent) => listener(payload);
+      ipcRenderer.on(terminalChannels.cwd, handler);
+      return () => ipcRenderer.off(terminalChannels.cwd, handler);
+    },
     onData: (listener: (event: TerminalDataEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: TerminalDataEvent) => listener(payload);
       ipcRenderer.on(terminalChannels.data, handler);
@@ -51,8 +57,11 @@ const bridge: AgentDeckBridge = {
     write: (id: string, data: string) => ipcRenderer.invoke(terminalChannels.write, id, data) as Promise<boolean>,
   },
   workspace: {
+    autoLoadWorkspace: () => ipcRenderer.invoke(workspaceChannels.autoLoad) as Promise<WorkspaceDocument | null>,
+    autoSaveWorkspace: (document: WorkspaceDocument) => ipcRenderer.invoke(workspaceChannels.autoSave, document) as Promise<boolean>,
     importWorkspace: () => ipcRenderer.invoke(workspaceChannels.import) as Promise<WorkspaceDocument | null>,
     saveWorkspace: (document: WorkspaceDocument) => ipcRenderer.invoke(workspaceChannels.save, document) as Promise<boolean>,
+    selectFolder: () => ipcRenderer.invoke(workspaceChannels.selectFolder) as Promise<string | null>,
   },
 };
 

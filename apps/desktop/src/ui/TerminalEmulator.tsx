@@ -5,8 +5,14 @@ import { getTerminalBridge } from "../terminal/bridge.js";
 
 const DEFAULT_TERMINAL_FONT_FAMILY = "JetBrains Mono, Cascadia Mono, Consolas, monospace";
 
-export function TerminalEmulator({ fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, paneId }: { fontFamily?: string; paneId: string }) {
+export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, onCwdChange, paneId }: { cwd: string; fontFamily?: string; onCwdChange: (cwd: string) => void; paneId: string }) {
   const terminalElementRef = useRef<HTMLDivElement>(null);
+  const initialCwdRef = useRef(cwd);
+  const onCwdChangeRef = useRef(onCwdChange);
+
+  useEffect(() => {
+    onCwdChangeRef.current = onCwdChange;
+  }, [onCwdChange]);
 
   useEffect(() => {
     const bridge = getTerminalBridge();
@@ -60,6 +66,11 @@ export function TerminalEmulator({ fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, pa
         terminal.write(event.data);
       }
     });
+    const removeCwdListener = bridge.onCwd((event) => {
+      if (event.id === paneId) {
+        onCwdChangeRef.current(event.cwd);
+      }
+    });
     const removeExitListener = bridge.onExit((event) => {
       if (event.id === paneId) {
         terminal.writeln(`\r\n[process exited with code ${event.exitCode}]`);
@@ -73,7 +84,7 @@ export function TerminalEmulator({ fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, pa
 
       resizePty();
       sessionCreated = true;
-      return bridge.createSession({ cols: terminal.cols, id: paneId, rows: terminal.rows });
+      return bridge.createSession({ cols: terminal.cols, cwd: initialCwdRef.current || undefined, id: paneId, rows: terminal.rows });
     }).then((created) => {
       if (!disposed && created === false) {
         terminal.writeln("Unable to start local shell session.");
@@ -95,6 +106,7 @@ export function TerminalEmulator({ fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, pa
       disposed = true;
       window.clearTimeout(resizeTimer);
       observer?.disconnect();
+      removeCwdListener();
       removeDataListener();
       removeExitListener();
       inputDisposable.dispose();

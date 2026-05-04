@@ -5,6 +5,7 @@ import type { WorkspaceDocument } from "../workspace/schema.js";
 export const terminalChannels = {
   close: "terminal:close",
   create: "terminal:create",
+  cwd: "terminal:cwd",
   data: "terminal:data",
   exit: "terminal:exit",
   resize: "terminal:resize",
@@ -12,8 +13,11 @@ export const terminalChannels = {
 } as const;
 
 export const workspaceChannels = {
+  autoLoad: "workspace:auto-load",
+  autoSave: "workspace:auto-save",
   import: "workspace:import",
   save: "workspace:save",
+  selectFolder: "workspace:select-folder",
 } as const;
 
 export const mcpChannels = {
@@ -72,13 +76,20 @@ export type McpSetupStatus = Record<McpClient, McpClientSetupStatus>;
 
 export interface TerminalCreateRequest {
   cols: number;
+  cwd?: string | undefined;
   id: string;
   rows: number;
+}
+
+export interface TerminalCwdEvent {
+  cwd: string;
+  id: string;
 }
 
 export interface TerminalBridge {
   closeSession: (id: string) => Promise<boolean>;
   createSession: (request: TerminalCreateRequest) => Promise<boolean>;
+  onCwd: (listener: (event: TerminalCwdEvent) => void) => () => void;
   onData: (listener: (event: TerminalDataEvent) => void) => () => void;
   onExit: (listener: (event: TerminalExitEvent) => void) => () => void;
   resize: (id: string, cols: number, rows: number) => Promise<boolean>;
@@ -86,8 +97,11 @@ export interface TerminalBridge {
 }
 
 export interface WorkspaceBridge {
+  autoLoadWorkspace: () => Promise<WorkspaceDocument | null>;
+  autoSaveWorkspace: (document: WorkspaceDocument) => Promise<boolean>;
   importWorkspace: () => Promise<WorkspaceDocument | null>;
   saveWorkspace: (document: WorkspaceDocument) => Promise<boolean>;
+  selectFolder: () => Promise<string | null>;
 }
 
 export interface McpBridge {

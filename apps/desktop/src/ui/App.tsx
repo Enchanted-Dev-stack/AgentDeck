@@ -32,6 +32,7 @@ interface TerminalPane {
   status: string;
   tone: "success" | "neutral" | "warn";
   command: string;
+  cwd: string;
 }
 
 interface TerminalTab {
@@ -62,6 +63,8 @@ interface RenameDialogState {
 const MIN_PANE_WIDTH = 220;
 const MIN_PANE_HEIGHT = 140;
 const MAX_PANE_TITLE_LENGTH = 80;
+const WORKSPACE_AUTOSAVE_DELAY_MS = 500;
+const MAX_TERMINAL_CWD_LENGTH = 4096;
 const CONTEXT_MENU_MARGIN = 8;
 const ESTIMATED_CONTEXT_MENU_WIDTH = 190;
 const ESTIMATED_CONTEXT_MENU_HEIGHT = 236;
@@ -112,10 +115,8 @@ const mcpClients: Array<{ id: McpClient; label: string; description: string; con
 ];
 
 const initialTerminalPanes: Record<string, TerminalPane> = {
-  "term-1": { id: "term-1", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "running", tone: "success", command: "opencode ." },
-  "term-2": { id: "term-2", title: "Dev server", detail: "Vite desktop preview", status: "idle", tone: "neutral", command: "pnpm --filter @agentdeck/desktop dev" },
-  "term-3": { id: "term-3", title: "Tests", detail: "workspace verification", status: "exit 0", tone: "success", command: "pnpm -r test" },
-  "term-4": { id: "term-4", title: "Scratch", detail: "permissioned local commands", status: "ready", tone: "warn", command: "git status --short" },
+  "term-1": { id: "term-1", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "running", tone: "success", command: "opencode .", cwd: "" },
+  "term-2": { id: "term-2", title: "Scratch", detail: "permissioned local commands", status: "ready", tone: "warn", command: "git status --short", cwd: "" },
 };
 
 export const initialSplitLayout: SplitNode = {
@@ -123,25 +124,7 @@ export const initialSplitLayout: SplitNode = {
   id: "root",
   direction: "row",
   sizes: [0.5, 0.5],
-  children: [
-    { type: "terminal", id: "term-1" },
-    {
-      type: "split",
-      id: "right-stack",
-      direction: "column",
-      sizes: [0.45, 0.55],
-      children: [
-        { type: "terminal", id: "term-2" },
-        {
-          type: "split",
-          id: "bottom-row",
-          direction: "row",
-          sizes: [0.5, 0.5],
-          children: [{ type: "terminal", id: "term-3" }, { type: "terminal", id: "term-4" }],
-        },
-      ],
-    },
-  ],
+  children: [{ type: "terminal", id: "term-1" }, { type: "terminal", id: "term-2" }],
 };
 
 const initialTerminalTabs: TerminalTab[] = [
@@ -173,26 +156,41 @@ export function App() {
   const [instructionPromptClient, setInstructionPromptClient] = useState<McpClient | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>(defaultAppSettings);
   const [terminalAppearance, setTerminalAppearance] = useState<WorkspaceTerminalAppearance>(defaultTerminalAppearance);
+  const [terminalDefaultCwd, setTerminalDefaultCwd] = useState("");
   const [terminalAppearancePanelOpen, setTerminalAppearancePanelOpen] = useState(false);
+  const [terminalSessionRevision, setTerminalSessionRevision] = useState(0);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const mcpStatusRequestId = useRef(0);
+  const workspaceAutosaveReady = useRef(false);
   const settingsUpdateRequestId = useRef(0);
   const [terminalState, setTerminalState] = useState({
     activeTabId: "tab-1",
     nextTabIndex: 2,
-    nextTerminalIndex: 5,
+    nextTerminalIndex: 3,
     tabs: initialTerminalTabs,
   });
   const activeTab = terminalState.tabs.find((tab) => tab.id === terminalState.activeTabId) ?? terminalState.tabs[0] ?? createTerminalTab("tab-1", 1, 1);
 
   useEffect(() => {
     void refreshMcpStatus();
-    void loadAppSettings();
+    void loadInitialWorkspace();
   }, []);
+
+  useEffect(() => {
+    if (!workspaceAutosaveReady.current) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      void autoSaveWorkspace();
+    }, WORKSPACE_AUTOSAVE_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [appSettings, terminalAppearance, terminalDefaultCwd, terminalState, workspaceName]);
 
   const visibleNavItems = appSettings.sharedContextEnabled ? navItems : navItems.filter((item) => item.id === "terminal");
 
@@ -235,7 +233,7 @@ export function App() {
         layout: insertTerminalOnSide(currentTab.layout, targetIds, terminalId, side),
         panes: {
           ...currentTab.panes,
-          [terminalId]: createTerminalPane(terminalId, terminalIndex),
+          [terminalId]: createTerminalPane(terminalId, terminalIndex, terminalDefaultCwd),
         },
       };
 
@@ -280,7 +278,7 @@ export function App() {
     setTerminalState((currentState) => {
       const tabIndex = currentState.nextTabIndex;
       const terminalIndex = currentState.nextTerminalIndex;
-      const tab = createTerminalTab(`tab-${tabIndex}`, tabIndex, terminalIndex);
+      const tab = createTerminalTab(`tab-${tabIndex}`, tabIndex, terminalIndex, terminalDefaultCwd);
 
       return {
         ...currentState,
@@ -307,7 +305,7 @@ export function App() {
 
       const remainingTabs = currentState.tabs.filter((tab) => tab.id !== tabId);
       if (remainingTabs.length === 0) {
-        const tab = createTerminalTab("tab-1", 1, currentState.nextTerminalIndex);
+        const tab = createTerminalTab("tab-1", 1, currentState.nextTerminalIndex, terminalDefaultCwd);
         return {
           ...currentState,
           activeTabId: tab.id,
@@ -366,7 +364,7 @@ export function App() {
                 panes: {
                   ...tab.panes,
                   [terminalId]: {
-                    ...(tab.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex)),
+                    ...(tab.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex, terminalDefaultCwd)),
                     title: nextTitle,
                   },
                 },
@@ -406,7 +404,7 @@ export function App() {
   }
 
   async function saveWorkspace() {
-    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, settings: { ...appSettings, terminalAppearance }, tabs: terminalState.tabs }));
+    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, settings: { ...appSettings, terminalAppearance, terminalDefaultCwd }, tabs: terminalState.tabs }));
   }
 
   async function importWorkspace() {
@@ -417,9 +415,11 @@ export function App() {
 
     await closeTerminalSessionsForTabs(terminalState.tabs);
 
+    setTerminalSessionRevision((currentRevision) => currentRevision + 1);
     setWorkspaceName(document.name);
     setTerminalState({ activeTabId: document.activeTabId, nextTabIndex: document.nextTabIndex, nextTerminalIndex: document.nextTerminalIndex, tabs: document.tabs });
     setTerminalAppearance(document.settings.terminalAppearance ?? defaultTerminalAppearance);
+    setTerminalDefaultCwd(document.settings.terminalDefaultCwd ?? "");
     setAppSettings(document.settings);
     await getSettingsBridge()?.update(document.settings);
     if (document.settings.sharedContextEnabled) {
@@ -438,12 +438,37 @@ export function App() {
     setTerminalAppearance((currentAppearance) => ({ ...currentAppearance, ...nextAppearance }));
   }
 
-  async function loadAppSettings() {
+  function updateTerminalDefaultCwd(nextCwd: string) {
+    setTerminalDefaultCwd(nextCwd.slice(0, MAX_TERMINAL_CWD_LENGTH));
+  }
+
+  async function selectTerminalDefaultCwd() {
+    const folderPath = await getWorkspaceBridge()?.selectFolder();
+    if (folderPath) {
+      updateTerminalDefaultCwd(folderPath);
+    }
+  }
+
+  async function loadInitialWorkspace() {
     setSettingsLoading(true);
     try {
       const settings = (await getSettingsBridge()?.get()) ?? defaultAppSettings;
-      setAppSettings(settings);
-      if (settings.sharedContextEnabled) {
+      const autosavedWorkspace = await getWorkspaceBridge()?.autoLoadWorkspace();
+      const nextSettings = autosavedWorkspace?.settings ?? { ...settings, terminalAppearance: defaultTerminalAppearance };
+
+      if (autosavedWorkspace) {
+        await closeTerminalSessionsForTabs(terminalState.tabs);
+        setTerminalSessionRevision((currentRevision) => currentRevision + 1);
+        setWorkspaceName(autosavedWorkspace.name);
+        setTerminalState({ activeTabId: autosavedWorkspace.activeTabId, nextTabIndex: autosavedWorkspace.nextTabIndex, nextTerminalIndex: autosavedWorkspace.nextTerminalIndex, tabs: autosavedWorkspace.tabs });
+        setTerminalAppearance(autosavedWorkspace.settings.terminalAppearance ?? defaultTerminalAppearance);
+        setTerminalDefaultCwd(autosavedWorkspace.settings.terminalDefaultCwd ?? "");
+        setTerminalAppearancePanelOpen(false);
+        await getSettingsBridge()?.update({ sharedContextEnabled: nextSettings.sharedContextEnabled });
+      }
+
+      setAppSettings(nextSettings);
+      if (nextSettings.sharedContextEnabled) {
         await bootstrapSharedWorkspace();
       } else {
         setActiveWorkspace(null);
@@ -453,8 +478,13 @@ export function App() {
       setAppSettings(defaultAppSettings);
       setWorkspaceError(error instanceof Error ? error.message : "Unable to load settings.");
     } finally {
+      workspaceAutosaveReady.current = true;
       setSettingsLoading(false);
     }
+  }
+
+  async function autoSaveWorkspace() {
+    await getWorkspaceBridge()?.autoSaveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, settings: { ...appSettings, terminalAppearance, terminalDefaultCwd }, tabs: terminalState.tabs }));
   }
 
   async function updateAppSettings(nextSettings: Partial<AppSettings>) {
@@ -591,6 +621,29 @@ export function App() {
     }));
   }
 
+  function updateTerminalCwd(terminalId: string, cwd: string) {
+    setTerminalState((currentState) => {
+      let changed = false;
+      const tabs = currentState.tabs.map((tab) => {
+        const pane = tab.panes[terminalId];
+        if (!pane || pane.cwd === cwd) {
+          return tab;
+        }
+
+        changed = true;
+        return {
+          ...tab,
+          panes: {
+            ...tab.panes,
+            [terminalId]: { ...pane, cwd },
+          },
+        };
+      });
+
+      return changed ? { ...currentState, tabs } : currentState;
+    });
+  }
+
   function selectTerminal(terminalId: string, rangeSelect: boolean) {
     if (!rangeSelect || !selectionAnchorId) {
       setSelectionAnchorId(terminalId);
@@ -668,19 +721,24 @@ export function App() {
                   hidden={!isActiveTab}
                   key={tab.id}
                   layout={tab.layout}
+                  sessionRevision={terminalSessionRevision}
                   appearance={terminalAppearance}
                   appearancePanelOpen={terminalAppearancePanelOpen}
+                  terminalDefaultCwd={terminalDefaultCwd}
                   onAddTerminal={addTerminal}
                   onAddTerminalToSide={addTerminalToSide}
                   onCloseContextMenu={() => setContextMenu(null)}
                   onCloseAppearancePanel={() => setTerminalAppearancePanelOpen(false)}
                   onToggleAppearancePanel={() => setTerminalAppearancePanelOpen((isOpen) => !isOpen)}
                   onUpdateAppearance={updateTerminalAppearance}
+                  onSelectTerminalDefaultCwd={selectTerminalDefaultCwd}
+                  onUpdateTerminalDefaultCwd={updateTerminalDefaultCwd}
                   onLayoutChange={updateLayout}
                   onOpenTerminalMenu={openTerminalMenu}
                   onRenameTerminal={renameTerminal}
                   onRemoveTerminals={removeTerminals}
                   onSelectTerminal={selectTerminal}
+                  onTerminalCwdChange={updateTerminalCwd}
                   panes={tab.panes}
                   selectedTerminalIds={isActiveTab ? selectedTerminalIds : new Set()}
                 />
@@ -821,10 +879,15 @@ function TerminalWorkspace({
   onRenameTerminal,
   onRemoveTerminals,
   onSelectTerminal,
+  onTerminalCwdChange,
   onToggleAppearancePanel,
   onUpdateAppearance,
+  onSelectTerminalDefaultCwd,
+  onUpdateTerminalDefaultCwd,
   panes,
+  sessionRevision,
   selectedTerminalIds,
+  terminalDefaultCwd,
 }: {
   appearance: WorkspaceTerminalAppearance;
   appearancePanelOpen: boolean;
@@ -842,10 +905,15 @@ function TerminalWorkspace({
   onRenameTerminal: (terminalId: string) => void;
   onRemoveTerminals: (terminalIds: string[]) => void;
   onSelectTerminal: (terminalId: string, additive: boolean) => void;
+  onTerminalCwdChange: (terminalId: string, cwd: string) => void;
   onToggleAppearancePanel: () => void;
   onUpdateAppearance: (appearance: Partial<WorkspaceTerminalAppearance>) => void;
+  onSelectTerminalDefaultCwd: () => Promise<void>;
+  onUpdateTerminalDefaultCwd: (cwd: string) => void;
   panes: Record<string, TerminalPane>;
+  sessionRevision: number;
   selectedTerminalIds: Set<string>;
+  terminalDefaultCwd: string;
 }) {
   const appearanceClassName = `terminal-workspace terminal-workspace--${appearance.shape} terminal-workspace--font-${appearance.font} terminal-workspace--spacing-${appearance.spacing} ${appearance.borders ? "terminal-workspace--borders" : "terminal-workspace--no-borders"} ${appearance.dividers ? "terminal-workspace--dividers" : "terminal-workspace--no-dividers"}`;
 
@@ -856,7 +924,7 @@ function TerminalWorkspace({
           <AgentDeckIcon name="add" size={17} />
           Add terminal
         </button>
-        <TerminalAppearanceControl appearance={appearance} isOpen={appearancePanelOpen} onDismiss={onCloseAppearancePanel} onToggle={onToggleAppearancePanel} onUpdateAppearance={onUpdateAppearance} />
+        <TerminalAppearanceControl appearance={appearance} isOpen={appearancePanelOpen} onDismiss={onCloseAppearancePanel} onSelectTerminalDefaultCwd={onSelectTerminalDefaultCwd} onToggle={onToggleAppearancePanel} onUpdateAppearance={onUpdateAppearance} onUpdateTerminalDefaultCwd={onUpdateTerminalDefaultCwd} terminalDefaultCwd={terminalDefaultCwd} />
       </section>
     );
   }
@@ -878,18 +946,20 @@ function TerminalWorkspace({
         appearance={appearance}
         onOpenTerminalMenu={onOpenTerminalMenu}
         onSelectTerminal={onSelectTerminal}
+        onTerminalCwdChange={onTerminalCwdChange}
         panes={panes}
         rootLayout={layout}
+        sessionRevision={sessionRevision}
         selectedTerminalIds={selectedTerminalIds}
         onLayoutChange={onLayoutChange}
       />
       {contextMenu ? <TerminalContextMenu canAdd={canAddToContextTargets} contextMenu={contextMenu} onAddTerminalToSide={onAddTerminalToSide} onClose={() => onRemoveTerminals(contextTargets)} onDismiss={onCloseContextMenu} onRename={onRenameTerminal} targets={contextTargets} /> : null}
-      <TerminalAppearanceControl appearance={appearance} isOpen={appearancePanelOpen} onDismiss={onCloseAppearancePanel} onToggle={onToggleAppearancePanel} onUpdateAppearance={onUpdateAppearance} />
+      <TerminalAppearanceControl appearance={appearance} isOpen={appearancePanelOpen} onDismiss={onCloseAppearancePanel} onSelectTerminalDefaultCwd={onSelectTerminalDefaultCwd} onToggle={onToggleAppearancePanel} onUpdateAppearance={onUpdateAppearance} onUpdateTerminalDefaultCwd={onUpdateTerminalDefaultCwd} terminalDefaultCwd={terminalDefaultCwd} />
     </section>
   );
 }
 
-function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onToggle, onUpdateAppearance }: { appearance: WorkspaceTerminalAppearance; isOpen: boolean; onDismiss: () => void; onToggle: () => void; onUpdateAppearance: (appearance: Partial<WorkspaceTerminalAppearance>) => void }) {
+function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onSelectTerminalDefaultCwd, onToggle, onUpdateAppearance, onUpdateTerminalDefaultCwd, terminalDefaultCwd }: { appearance: WorkspaceTerminalAppearance; isOpen: boolean; onDismiss: () => void; onSelectTerminalDefaultCwd: () => Promise<void>; onToggle: () => void; onUpdateAppearance: (appearance: Partial<WorkspaceTerminalAppearance>) => void; onUpdateTerminalDefaultCwd: (cwd: string) => void; terminalDefaultCwd: string }) {
   function handlePanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Escape") {
       return;
@@ -903,6 +973,15 @@ function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onToggle, on
     <div className="terminal-appearance" onClick={(event) => event.stopPropagation()}>
       {isOpen ? (
         <div aria-label="Terminal appearance" className="terminal-appearance__panel" onKeyDown={handlePanelKeyDown}>
+          <fieldset>
+            <span className="terminal-appearance__label" id="terminal-default-cwd-label">Default path</span>
+            <span className="terminal-appearance__path-row">
+              <input aria-labelledby="terminal-default-cwd-label" className="terminal-appearance__input" maxLength={MAX_TERMINAL_CWD_LENGTH} onChange={(event) => onUpdateTerminalDefaultCwd(event.target.value)} placeholder="Leave blank for home" type="text" value={terminalDefaultCwd} />
+              <button aria-label="Choose default terminal folder" className="terminal-appearance__folder-button" onClick={() => void onSelectTerminalDefaultCwd()} title="Choose folder" type="button">
+                <AgentDeckIcon name="folder" size={15} />
+              </button>
+            </span>
+          </fieldset>
           <fieldset>
             <legend className="terminal-appearance__label">Font</legend>
             <div className="terminal-appearance__options terminal-appearance__options--font">
@@ -970,8 +1049,10 @@ function SplitView({
   onLayoutChange,
   onOpenTerminalMenu,
   onSelectTerminal,
+  onTerminalCwdChange,
   panes,
   rootLayout,
+  sessionRevision,
   selectedTerminalIds,
 }: {
   appearance: WorkspaceTerminalAppearance;
@@ -979,19 +1060,21 @@ function SplitView({
   onLayoutChange: (layout: SplitNode) => void;
   onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
   onSelectTerminal: (terminalId: string, additive: boolean) => void;
+  onTerminalCwdChange: (terminalId: string, cwd: string) => void;
   panes: Record<string, TerminalPane>;
   rootLayout: SplitNode;
+  sessionRevision: number;
   selectedTerminalIds: Set<string>;
 }) {
   if (node.type === "terminal") {
-    return <TerminalPaneView fontFamily={terminalFontFamilies[appearance.font]} isSelected={selectedTerminalIds.has(node.id)} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
+    return <TerminalPaneView fontFamily={terminalFontFamilies[appearance.font]} isSelected={selectedTerminalIds.has(node.id)} key={`${sessionRevision}:${node.id}`} onCwdChange={onTerminalCwdChange} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
   }
 
   return (
     <div className={`split split--${node.direction}`} data-split-id={node.id}>
       {node.children.map((child, index) => (
         <div className="split__child" key={getNodeKey(child)} style={getChildStyle(node, child, index)}>
-          <SplitView appearance={appearance} node={child} onLayoutChange={onLayoutChange} onOpenTerminalMenu={onOpenTerminalMenu} onSelectTerminal={onSelectTerminal} panes={panes} rootLayout={rootLayout} selectedTerminalIds={selectedTerminalIds} />
+          <SplitView appearance={appearance} node={child} onLayoutChange={onLayoutChange} onOpenTerminalMenu={onOpenTerminalMenu} onSelectTerminal={onSelectTerminal} onTerminalCwdChange={onTerminalCwdChange} panes={panes} rootLayout={rootLayout} sessionRevision={sessionRevision} selectedTerminalIds={selectedTerminalIds} />
           {index < node.children.length - 1 ? <ResizeSash direction={node.direction} group={node} index={index} onLayoutChange={onLayoutChange} rootLayout={rootLayout} /> : null}
         </div>
       ))}
@@ -1083,7 +1166,7 @@ function ResizeSash({
   );
 }
 
-function TerminalPaneView({ fontFamily, isSelected, onOpenMenu, onSelect, pane }: { fontFamily: string; isSelected: boolean; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
+function TerminalPaneView({ fontFamily, isSelected, onCwdChange, onOpenMenu, onSelect, pane }: { fontFamily: string; isSelected: boolean; onCwdChange: (terminalId: string, cwd: string) => void; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
   if (!pane) {
     return null;
   }
@@ -1131,7 +1214,7 @@ function TerminalPaneView({ fontFamily, isSelected, onOpenMenu, onSelect, pane }
         </span>
       </header>
       <div className="terminal-pane__body">
-        <TerminalEmulator fontFamily={fontFamily} paneId={terminalPane.id} />
+        <TerminalEmulator cwd={terminalPane.cwd} fontFamily={fontFamily} onCwdChange={(cwd) => onCwdChange(terminalPane.id, cwd)} paneId={terminalPane.id} />
       </div>
     </article>
   );
@@ -1416,9 +1499,10 @@ export function removeTerminalFromLayout(layout: SplitNode | null, terminalId: s
   };
 }
 
-function createTerminalPane(id: string, index: number): TerminalPane {
+function createTerminalPane(id: string, index: number, defaultCwd = ""): TerminalPane {
   return {
     command: "shell",
+    cwd: defaultCwd,
     detail: "new local terminal",
     id,
     status: "ready",
@@ -1427,13 +1511,13 @@ function createTerminalPane(id: string, index: number): TerminalPane {
   };
 }
 
-function createTerminalTab(id: string, tabIndex: number, terminalIndex: number): TerminalTab {
+function createTerminalTab(id: string, tabIndex: number, terminalIndex: number, defaultCwd = ""): TerminalTab {
   const terminalId = `term-${terminalIndex}`;
   return {
     id,
     layout: { type: "terminal", id: terminalId },
     panes: {
-      [terminalId]: createTerminalPane(terminalId, terminalIndex),
+      [terminalId]: createTerminalPane(terminalId, terminalIndex, defaultCwd),
     },
     title: `Tab ${tabIndex}`,
   };

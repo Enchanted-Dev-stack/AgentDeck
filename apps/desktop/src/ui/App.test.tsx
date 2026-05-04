@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("./TerminalEmulator.js", () => ({
-  TerminalEmulator: ({ paneId }: { paneId: string }) => <div data-testid={`terminal-emulator-${paneId}`} />,
+  TerminalEmulator: ({ cwd, onCwdChange, paneId }: { cwd?: string; onCwdChange?: (cwd: string) => void; paneId: string }) => <div data-cwd={cwd} data-testid={`terminal-emulator-${paneId}`} onClick={() => onCwdChange?.(`D:\\${paneId}`)} />,
 }));
 
 import { App, canInsertTerminalOnSide, getClampedContextMenuPosition, getTerminalRange, initialSplitLayout, insertTerminal, insertTerminalOnSide, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
@@ -41,7 +41,7 @@ describe("App", () => {
 
     expect(initialSplitLayout.direction).toBe("row");
     expect(initialSplitLayout.sizes).toEqual([0.5, 0.5]);
-    expect(countTerminals(initialSplitLayout)).toBe(4);
+    expect(countTerminals(initialSplitLayout)).toBe(2);
   });
 
   test("resizes one pane by shrinking the adjacent attached pane", () => {
@@ -59,12 +59,12 @@ describe("App", () => {
     }
 
     expect(nextLayout.sizes).toEqual([0.58, 0.42000000000000004]);
-    expect(findSplitSizes(nextLayout, "bottom-row")).toEqual([0.5, 0.5]);
+    expect(findSplitSizes(nextLayout, "missing")).toBeUndefined();
   });
 
   test("adds and removes terminals in the split tree", () => {
-    const expandedLayout = insertTerminal(initialSplitLayout, "term-1", "term-5", "row");
-    expect(countTerminals(expandedLayout)).toBe(5);
+    const expandedLayout = insertTerminal(initialSplitLayout, "term-1", "term-3", "row");
+    expect(countTerminals(expandedLayout)).toBe(3);
 
     if (expandedLayout.type !== "split") {
       throw new Error("Expected split layout");
@@ -73,9 +73,9 @@ describe("App", () => {
     expect(expandedLayout.children).toHaveLength(3);
     expect(expandedLayout.sizes).toEqual([0.25, 0.25, 0.5]);
 
-    const removedLayout = removeTerminalFromLayout(expandedLayout, "term-5");
+    const removedLayout = removeTerminalFromLayout(expandedLayout, "term-3");
     expect(removedLayout).not.toBeNull();
-    expect(countTerminals(removedLayout ?? initialSplitLayout)).toBe(4);
+    expect(countTerminals(removedLayout ?? initialSplitLayout)).toBe(2);
 
     if (removedLayout?.type !== "split") {
       throw new Error("Expected split layout after removal");
@@ -85,18 +85,19 @@ describe("App", () => {
   });
 
   test("adds terminals around adjacent selected panes", () => {
-    const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-3", "term-4"], "term-5", "right");
-    const bottomRowSizes = findSplitSizes(expandedLayout, "bottom-row");
+    const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-1", "term-2"], "term-3", "right");
+    const rootSizes = findSplitSizes(expandedLayout, "root");
 
-    expect(countTerminals(expandedLayout)).toBe(5);
-    expect(bottomRowSizes).toEqual([0.33333333333333337, 0.33333333333333337, 0.3333333333333333]);
+    expect(countTerminals(expandedLayout)).toBe(3);
+    expect(rootSizes).toEqual([0.33333333333333337, 0.33333333333333337, 0.3333333333333333]);
   });
 
   test("validates contiguous selections before side insertion", () => {
-    expect(getTerminalRange(initialSplitLayout, "term-2", "term-3")).toEqual(["term-2", "term-3"]);
-    expect(canInsertTerminalOnSide(initialSplitLayout, ["term-3", "term-4"])).toBe(true);
-    expect(canInsertTerminalOnSide(initialSplitLayout, ["term-2", "term-3"])).toBe(false);
-    expect(insertTerminalOnSide(initialSplitLayout, ["term-2", "term-3"], "term-5", "right")).toBe(initialSplitLayout);
+    const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-2"], "term-3", "right");
+    expect(getTerminalRange(expandedLayout, "term-1", "term-2")).toEqual(["term-1", "term-2"]);
+    expect(canInsertTerminalOnSide(expandedLayout, ["term-1", "term-2"])).toBe(true);
+    expect(canInsertTerminalOnSide(expandedLayout, ["term-1", "term-3"])).toBe(false);
+    expect(insertTerminalOnSide(expandedLayout, ["term-1", "term-3"], "term-4", "right")).toBe(expandedLayout);
   });
 
   test("keeps terminal context menus inside the viewport", () => {
@@ -105,13 +106,13 @@ describe("App", () => {
   });
 
   test("inserts terminals to the requested side", () => {
-    const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-1"], "term-5", "left");
+    const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-1"], "term-3", "left");
 
     if (expandedLayout.type !== "split") {
       throw new Error("Expected split layout");
     }
 
-    expect(expandedLayout.children[0]).toEqual({ type: "terminal", id: "term-5" });
+    expect(expandedLayout.children[0]).toEqual({ type: "terminal", id: "term-3" });
     expect(expandedLayout.sizes).toEqual([0.25, 0.25, 0.5]);
   });
 
@@ -122,14 +123,14 @@ describe("App", () => {
     expect(screen.getByRole("menu")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
-    expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
+    expect(screen.getByLabelText("Terminal 3 terminal")).toBeTruthy();
 
-    fireEvent.contextMenu(screen.getByLabelText("Terminal 5 terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.contextMenu(screen.getByLabelText("Terminal 3 terminal"), { clientX: 24, clientY: 30 });
     const closeSession = vi.fn(() => Promise.resolve(true));
     window.agentDeck = createFakeBridge({ closeSession });
     fireEvent.click(screen.getByRole("menuitem", { name: "Close selected" }));
-    expect(screen.queryByLabelText("Terminal 5 terminal")).toBeNull();
-    expect(closeSession).toHaveBeenCalledWith("term-5");
+    expect(screen.queryByLabelText("Terminal 3 terminal")).toBeNull();
+    expect(closeSession).toHaveBeenCalledWith("term-3");
   });
 
   test("renames a terminal from the context menu", () => {
@@ -150,13 +151,13 @@ describe("App", () => {
       savedDocuments.push(document);
       return Promise.resolve(true);
     });
-    window.agentDeck = createFakeBridge({ workspace: { importWorkspace: () => Promise.resolve(null), saveWorkspace } });
+    window.agentDeck = createFakeBridge({ workspace: { autoLoadWorkspace: () => Promise.resolve(null), autoSaveWorkspace: () => Promise.resolve(true), importWorkspace: () => Promise.resolve(null), saveWorkspace } });
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 5, settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } } });
+    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 3, settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } } });
     expect((savedDocuments[0] as { tabs: unknown[] }).tabs).toHaveLength(1);
   });
 
@@ -165,19 +166,21 @@ describe("App", () => {
     window.agentDeck = createFakeBridge({
       closeSession,
       workspace: {
+        autoLoadWorkspace: () => Promise.resolve(null),
+        autoSaveWorkspace: () => Promise.resolve(true),
         importWorkspace: () =>
           Promise.resolve({
             activeTabId: "tab-9",
             name: "Imported",
             nextTabIndex: 10,
             nextTerminalIndex: 10,
-            settings: { sharedContextEnabled: false, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } },
+            settings: { sharedContextEnabled: false, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" }, terminalDefaultCwd: "D:\\imported-default" },
             tabs: [
               {
                 id: "tab-9",
                 layout: { id: "term-9", type: "terminal" },
                 panes: {
-                  "term-9": { command: "shell", detail: "imported", id: "term-9", status: "ready", title: "Imported Shell", tone: "neutral" },
+                  "term-9": { command: "shell", cwd: "D:\\imported", detail: "imported", id: "term-9", status: "ready", title: "Imported Shell", tone: "neutral" },
                 },
                 title: "Imported Tab",
               },
@@ -194,7 +197,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByLabelText("Imported Shell terminal")).toBeTruthy());
     expect(screen.queryByLabelText("OpenCode terminal")).toBeNull();
     expect(closeSession).toHaveBeenCalledWith("term-1");
-    expect(closeSession).toHaveBeenCalledWith("term-4");
+    expect(closeSession).toHaveBeenCalledWith("term-2");
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--boxy");
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--font-consolas");
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--spacing-roomy");
@@ -202,6 +205,70 @@ describe("App", () => {
     expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--no-dividers");
     await userEvent.setup().click(screen.getByRole("button", { name: "Settings" }));
     expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  });
+
+  test("loads an autosaved workspace on startup", async () => {
+    const updateSettings = vi.fn((settings: Partial<AppSettings>) => Promise.resolve({ sharedContextEnabled: settings.sharedContextEnabled ?? true }));
+    window.agentDeck = createFakeBridge({
+      settings: createFakeSettingsBridge({ update: updateSettings }),
+      workspace: {
+        autoLoadWorkspace: () =>
+          Promise.resolve({
+            activeTabId: "tab-9",
+            name: "Autosaved",
+            nextTabIndex: 10,
+            nextTerminalIndex: 10,
+            settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: true, font: "system", shape: "boxy", spacing: "compact" }, terminalDefaultCwd: "D:\\autosaved-default" },
+            tabs: [
+              {
+                id: "tab-9",
+                layout: { id: "term-9", type: "terminal" },
+                panes: {
+                  "term-9": { command: "shell", cwd: "D:\\autosaved", detail: "autosaved", id: "term-9", status: "ready", title: "Restored Shell", tone: "neutral" },
+                },
+                title: "Restored Tab",
+              },
+            ],
+            version: 3,
+          }),
+        autoSaveWorkspace: () => Promise.resolve(true),
+        importWorkspace: () => Promise.resolve(null),
+        saveWorkspace: () => Promise.resolve(true),
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Restored Shell terminal")).toBeTruthy());
+    expect(updateSettings).toHaveBeenCalledWith({ sharedContextEnabled: true });
+    expect(screen.queryByLabelText("OpenCode terminal")).toBeNull();
+    expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--font-system");
+    expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--spacing-compact");
+  });
+
+  test("autosaves terminal workspace changes", async () => {
+    const autoSaveWorkspace = vi.fn(() => Promise.resolve(true));
+    window.agentDeck = createFakeBridge({ workspace: { autoLoadWorkspace: () => Promise.resolve(null), autoSaveWorkspace, importWorkspace: () => Promise.resolve(null), saveWorkspace: () => Promise.resolve(true) } });
+    render(<App />);
+
+    fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
+
+    await waitFor(() => expect(autoSaveWorkspace).toHaveBeenCalled());
+    expect(autoSaveWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({ nextTerminalIndex: 4 }));
+  });
+
+  test("autosaves automatically tracked terminal cwd", async () => {
+    const autoLoadWorkspace = vi.fn(() => Promise.resolve(null));
+    const autoSaveWorkspace = vi.fn(() => Promise.resolve(true));
+    window.agentDeck = createFakeBridge({ workspace: { autoLoadWorkspace, autoSaveWorkspace, importWorkspace: () => Promise.resolve(null), saveWorkspace: () => Promise.resolve(true) } });
+    render(<App />);
+
+    await waitFor(() => expect(autoLoadWorkspace).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId("terminal-emulator-term-1"));
+
+    await waitFor(() => expect(autoSaveWorkspace).toHaveBeenCalled());
+    expect(autoSaveWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({ tabs: [expect.objectContaining({ panes: expect.objectContaining({ "term-1": expect.objectContaining({ cwd: "D:\\term-1" }) }) })] }));
   });
 
   test("updates terminal appearance from the floating control", async () => {
@@ -232,7 +299,7 @@ describe("App", () => {
       savedDocuments.push(document);
       return Promise.resolve(true);
     });
-    window.agentDeck = createFakeBridge({ workspace: { importWorkspace: () => Promise.resolve(null), saveWorkspace } });
+    window.agentDeck = createFakeBridge({ workspace: { autoLoadWorkspace: () => Promise.resolve(null), autoSaveWorkspace: () => Promise.resolve(true), importWorkspace: () => Promise.resolve(null), saveWorkspace } });
     const user = userEvent.setup();
     render(<App />);
 
@@ -248,6 +315,32 @@ describe("App", () => {
     expect(savedDocuments[0]).toMatchObject({ settings: { terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } } });
   });
 
+  test("uses the configured default path for newly spawned terminals", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("OpenCode terminal")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Terminal appearance" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Default path" }), { target: { value: "D:\\projects\\AgentDeck" } });
+    fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
+
+    expect(screen.getByTestId("terminal-emulator-term-3").getAttribute("data-cwd")).toBe("D:\\projects\\AgentDeck");
+    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-cwd")).toBe("");
+  });
+
+  test("selects the terminal default path with a folder picker", async () => {
+    const selectFolder = vi.fn(() => Promise.resolve("D:\\picked"));
+    window.agentDeck = createFakeBridge({ workspace: { autoLoadWorkspace: () => Promise.resolve(null), autoSaveWorkspace: () => Promise.resolve(true), importWorkspace: () => Promise.resolve(null), saveWorkspace: () => Promise.resolve(true), selectFolder } });
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("OpenCode terminal")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Terminal appearance" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose default terminal folder" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Default path" })).toHaveProperty("value", "D:\\picked"));
+    expect(selectFolder).toHaveBeenCalled();
+  });
+
   test("creates and switches terminal tabs", () => {
     render(<App />);
 
@@ -255,7 +348,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "New terminal tab" }));
 
     expect(screen.getByRole("tab", { name: /Tab 2/ }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
+    expect(screen.getByLabelText("Terminal 3 terminal")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("tab", { name: /Main/ }));
     expect(screen.getByRole("tab", { name: /Main/ }).getAttribute("aria-selected")).toBe("true");
@@ -281,7 +374,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "New terminal tab" }));
     fireEvent.click(screen.getByLabelText("Close Tab 2 tab"));
 
-    expect(closeSession).toHaveBeenCalledWith("term-5");
+    expect(closeSession).toHaveBeenCalledWith("term-3");
     expect(screen.queryByRole("tab", { name: /Tab 2/ })).toBeNull();
     expect(screen.getByRole("tab", { name: /Main/ }).getAttribute("aria-selected")).toBe("true");
   });
@@ -305,54 +398,41 @@ describe("App", () => {
     fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
     fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
 
-    expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
-    expect(screen.getByLabelText("Terminal 6 terminal")).toBeTruthy();
+    expect(screen.getByLabelText("Terminal 3 terminal")).toBeTruthy();
+    expect(screen.getByLabelText("Terminal 4 terminal")).toBeTruthy();
   });
 
   test("shift-selects adjacent terminals before adding to a side", () => {
     render(<App />);
 
-    fireEvent.click(screen.getByLabelText("Tests terminal"), { shiftKey: true });
+    fireEvent.click(screen.getByLabelText("OpenCode terminal"));
     fireEvent.click(screen.getByLabelText("Scratch terminal"), { shiftKey: true });
     fireEvent.contextMenu(screen.getByLabelText("Scratch terminal"), { clientX: 24, clientY: 30 });
 
     expect(screen.getByText("Add terminal beside 2 terminals")).toBeTruthy();
     fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
-    expect(screen.getByLabelText("Terminal 5 terminal")).toBeTruthy();
-  });
-
-  test("disables side insertion for non-group selections", () => {
-    render(<App />);
-
-    fireEvent.click(screen.getByLabelText("Dev server terminal"));
-    fireEvent.click(screen.getByLabelText("Tests terminal"), { shiftKey: true });
-    fireEvent.contextMenu(screen.getByLabelText("Tests terminal"), { clientX: 24, clientY: 30 });
-
-    expect(screen.getByText("Select one attached pane group")).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: "Right" }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByLabelText("Terminal 3 terminal")).toBeTruthy();
   });
 
   test("closes multiple selected terminals", () => {
     render(<App />);
 
-    fireEvent.click(screen.getByLabelText("Tests terminal"));
+    fireEvent.click(screen.getByLabelText("OpenCode terminal"));
     fireEvent.click(screen.getByLabelText("Scratch terminal"), { shiftKey: true });
     fireEvent.contextMenu(screen.getByLabelText("Scratch terminal"), { clientX: 24, clientY: 30 });
     fireEvent.click(screen.getByRole("menuitem", { name: "Close selected" }));
 
-    expect(screen.queryByLabelText("Tests terminal")).toBeNull();
+    expect(screen.queryByLabelText("OpenCode terminal")).toBeNull();
     expect(screen.queryByLabelText("Scratch terminal")).toBeNull();
-    expect(screen.getByLabelText("OpenCode terminal")).toBeTruthy();
-    expect(screen.getByLabelText("Dev server terminal")).toBeTruthy();
   });
 
   test("exposes resize sashes as oriented separators", () => {
     render(<App />);
 
     const separators = screen.getAllByRole("separator");
-    expect(separators).toHaveLength(3);
-    expect(separators.map((separator) => separator.getAttribute("aria-orientation"))).toEqual(["vertical", "horizontal", "vertical"]);
-    expect(separators.map((separator) => separator.getAttribute("aria-label"))).toEqual(["Resize root panes", "Resize right-stack panes", "Resize bottom-row panes"]);
+    expect(separators).toHaveLength(1);
+    expect(separators.map((separator) => separator.getAttribute("aria-orientation"))).toEqual(["vertical"]);
+    expect(separators.map((separator) => separator.getAttribute("aria-label"))).toEqual(["Resize root panes"]);
   });
 
   test("moves shared context to separate pages", async () => {
@@ -854,7 +934,7 @@ function createFakeSettingsBridge(overrides: Partial<SettingsBridge> = {}): Sett
   };
 }
 
-function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> & { mcp?: NonNullable<Window["agentDeck"]>["mcp"]; settings?: NonNullable<Window["agentDeck"]>["settings"]; shared?: NonNullable<Window["agentDeck"]>["shared"]; workspace?: NonNullable<Window["agentDeck"]>["workspace"] } = {}): NonNullable<Window["agentDeck"]> {
+function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["terminal"]> & { mcp?: NonNullable<Window["agentDeck"]>["mcp"]; settings?: NonNullable<Window["agentDeck"]>["settings"]; shared?: NonNullable<Window["agentDeck"]>["shared"]; workspace?: Partial<NonNullable<Window["agentDeck"]>["workspace"]> } = {}): NonNullable<Window["agentDeck"]> {
   const { mcp, settings, shared, workspace, ...terminalOverrides } = overrides;
   return {
     mcp: mcp ?? {
@@ -870,15 +950,20 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
     terminal: {
       closeSession: () => Promise.resolve(true),
       createSession: () => Promise.resolve(true),
+      onCwd: () => () => undefined,
       onData: () => () => undefined,
       onExit: () => () => undefined,
       resize: () => Promise.resolve(true),
       write: () => Promise.resolve(true),
       ...terminalOverrides,
     },
-    workspace: workspace ?? {
+    workspace: {
+      autoLoadWorkspace: () => Promise.resolve(null),
+      autoSaveWorkspace: () => Promise.resolve(true),
       importWorkspace: () => Promise.resolve(null),
       saveWorkspace: () => Promise.resolve(true),
+      selectFolder: () => Promise.resolve(null),
+      ...workspace,
     },
   };
 }

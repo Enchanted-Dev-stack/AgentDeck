@@ -1,8 +1,9 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, type IpcMainInvokeEvent, type OpenDialogOptions, type SaveDialogOptions } from "electron";
-import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
-import { lstat, open, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildAgentDeckServerSpec, createManualConfigSnippet, createMcpInstructions, getClientConfigPath, getMcpInstructionsPath, getOpenCodeGlobalConfigPath, installMcpConfig, installMcpInstructions, removeMcpConfig, type McpClient, type McpInstructionScope } from "@agentdeck/mcp-server";
@@ -15,11 +16,17 @@ import { parseWorkspaceDocument } from "../workspace/schema.js";
 const MAX_TERMINAL_ID_LENGTH = 80;
 const MAX_TERMINAL_WRITE_LENGTH = 16_384;
 const MAX_WORKSPACE_FILE_BYTES = 1_000_000;
+const WORKSPACE_AUTOSAVE_FILE_NAME = "agentdeck-workspace-autosave.json";
 const CLAUDE_MCP_COMMAND_TIMEOUT_MS = 15_000;
 const MAX_SHARED_DOC_BYTES = 1_000_000;
 const supportedSharedDocExtensions = new Set([".adoc", ".md", ".mdx", ".rst", ".txt"]);
 const defaultAppSettings: AppSettings = { sharedContextEnabled: true };
 const sessionOwners = new Map<string, number>();
+const sessionCwdReportPaths = new Map<string, string>();
+const sessionCwdReportTimers = new Map<string, NodeJS.Timeout>();
+const sessionCwdReportWatchers = new Map<string, FSWatcher>();
+const sessionLastCwds = new Map<string, string>();
+let workspaceAutosaveQueue = Promise.resolve(true);
 
 class NodePtyAdapter implements PtyAdapter {
   spawn(options: TerminalSpawnOptions) {
@@ -48,6 +55,7 @@ const terminalHost = new TerminalSessionHost(new NodePtyAdapter(), {
   onExit: (event) => {
     sendToOwner(terminalChannels.exit, event.id, event);
     sessionOwners.delete(event.id);
+    stopCwdReportWatcher(event.id);
   },
 });
 
@@ -78,11 +86,17 @@ function registerTerminalIpc() {
       return true;
     }
 
+    let cwdReportPath: string | undefined;
     try {
-      terminalHost.createSession({ cols: request.cols, cwd: app.getPath("home"), env: getSafeShellEnv(), id: request.id, rows: request.rows, shell: resolveAvailableShell() });
+      cwdReportPath = createCwdReportFilePath(request.id);
+      terminalHost.createSession({ cols: request.cols, cwd: request.cwd || app.getPath("home"), env: getSafeShellEnv(), id: request.id, rows: request.rows, shell: resolveAvailableShell(cwdReportPath) });
       sessionOwners.set(request.id, ownerId);
+      startCwdReportWatcher(request.id, cwdReportPath);
       return true;
     } catch (error) {
+      if (cwdReportPath) {
+        rmSync(cwdReportPath, { force: true });
+      }
       console.error("Failed to create terminal session", error);
       return false;
     }
@@ -115,6 +129,7 @@ function registerTerminalIpc() {
     const closed = terminalHost.closeSession(id);
     if (closed) {
       sessionOwners.delete(id);
+      stopCwdReportWatcher(id);
     }
 
     return closed;
@@ -122,6 +137,39 @@ function registerTerminalIpc() {
 }
 
 function registerWorkspaceIpc() {
+  ipcMain.handle(workspaceChannels.autoLoad, async (event) => {
+    if (!isTrustedIpcEvent(event)) {
+      return null;
+    }
+
+    try {
+      const filePath = getWorkspaceAutosaveFilePath();
+      const fileStats = await stat(filePath);
+      if (fileStats.size > MAX_WORKSPACE_FILE_BYTES) {
+        return null;
+      }
+
+      const rawDocument = await readFile(filePath, "utf8");
+      return parseWorkspaceDocument(JSON.parse(rawDocument));
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        return null;
+      }
+
+      console.error("Failed to load autosaved workspace", error);
+      return null;
+    }
+  });
+
+  ipcMain.handle(workspaceChannels.autoSave, async (event, payload: unknown) => {
+    if (!isTrustedIpcEvent(event)) {
+      return false;
+    }
+
+    workspaceAutosaveQueue = workspaceAutosaveQueue.then(() => writeWorkspaceAutosave(payload), () => writeWorkspaceAutosave(payload));
+    return workspaceAutosaveQueue;
+  });
+
   ipcMain.handle(workspaceChannels.save, async (event, payload: unknown) => {
     if (!isTrustedIpcEvent(event)) {
       return false;
@@ -182,6 +230,42 @@ function registerWorkspaceIpc() {
       return null;
     }
   });
+
+  ipcMain.handle(workspaceChannels.selectFolder, async (event) => {
+    if (!isTrustedIpcEvent(event)) {
+      return null;
+    }
+
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      properties: ["openDirectory"],
+      title: "Select default terminal folder",
+    };
+    const result = ownerWindow ? await dialog.showOpenDialog(ownerWindow, options) : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+}
+
+async function writeWorkspaceAutosave(payload: unknown) {
+  const document = parseWorkspaceDocument(payload);
+  if (!document) {
+    return false;
+  }
+
+  const filePath = getWorkspaceAutosaveFilePath();
+  const tempPath = `${filePath}.tmp`;
+  try {
+    await writeFile(tempPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    await rename(tempPath, filePath);
+    return true;
+  } catch (error) {
+    console.error("Failed to autosave workspace", error);
+    return false;
+  }
+}
+
+function getWorkspaceAutosaveFilePath() {
+  return join(app.getPath("userData"), WORKSPACE_AUTOSAVE_FILE_NAME);
 }
 
 function registerSharedStateIpc() {
@@ -480,7 +564,7 @@ function registerMcpIpc() {
 }
 
 function parseCreateRequest(payload: unknown): TerminalCreateRequest | undefined {
-  if (!isPlainObject(payload) || !hasOnlyKeys(payload, ["cols", "id", "rows"])) {
+  if (!isPlainObject(payload) || !hasOnlyKeys(payload, ["cols", "cwd", "id", "rows"])) {
     return undefined;
   }
 
@@ -491,7 +575,29 @@ function parseCreateRequest(payload: unknown): TerminalCreateRequest | undefined
     return undefined;
   }
 
-  return { cols, id, rows };
+  const cwd = parseTerminalCwd(payload.cwd);
+  return cwd ? { cols, cwd, id, rows } : { cols, id, rows };
+}
+
+function parseTerminalCwd(payload: unknown) {
+  if (payload === undefined) {
+    return undefined;
+  }
+
+  if (typeof payload !== "string" || payload.length === 0 || payload.length > 4096) {
+    return undefined;
+  }
+
+  if (!isAbsolute(payload)) {
+    return undefined;
+  }
+
+  const cwd = resolve(payload);
+  try {
+    return statSync(cwd).isDirectory() ? cwd : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseTerminalId(payload: unknown) {
@@ -508,6 +614,70 @@ function parseTerminalDimension(payload: unknown, maxValue: number): number | un
   }
 
   return payload;
+}
+
+function createCwdReportFilePath(sessionId: string) {
+  const directory = join(app.getPath("userData"), "terminal-cwd");
+  mkdirSync(directory, { recursive: true });
+  const filePath = join(directory, `${sessionId}-${randomUUID()}.txt`);
+  writeFileSync(filePath, "", "utf8");
+  return filePath;
+}
+
+function startCwdReportWatcher(sessionId: string, filePath: string) {
+  stopCwdReportWatcher(sessionId);
+  sessionCwdReportPaths.set(sessionId, filePath);
+  const watcher = watch(filePath, () => scheduleCwdReportRead(sessionId));
+  sessionCwdReportWatchers.set(sessionId, watcher);
+}
+
+function scheduleCwdReportRead(sessionId: string) {
+  const currentTimer = sessionCwdReportTimers.get(sessionId);
+  if (currentTimer) {
+    clearTimeout(currentTimer);
+  }
+
+  const timer = setTimeout(() => {
+    sessionCwdReportTimers.delete(sessionId);
+    void readCwdReport(sessionId);
+  }, 25);
+  sessionCwdReportTimers.set(sessionId, timer);
+}
+
+async function readCwdReport(sessionId: string) {
+  const filePath = sessionCwdReportPaths.get(sessionId);
+  if (!filePath) {
+    return;
+  }
+
+  try {
+    const cwd = parseTerminalCwd((await readFile(filePath, "utf8")).trim());
+    if (!cwd || sessionLastCwds.get(sessionId) === cwd) {
+      return;
+    }
+
+    sessionLastCwds.set(sessionId, cwd);
+    sendToOwner(terminalChannels.cwd, sessionId, { cwd, id: sessionId });
+  } catch {
+    // The shell may be exiting while the watcher fires.
+  }
+}
+
+function stopCwdReportWatcher(sessionId: string) {
+  const timer = sessionCwdReportTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    sessionCwdReportTimers.delete(sessionId);
+  }
+
+  sessionCwdReportWatchers.get(sessionId)?.close();
+  sessionCwdReportWatchers.delete(sessionId);
+  sessionLastCwds.delete(sessionId);
+  const filePath = sessionCwdReportPaths.get(sessionId);
+  if (filePath) {
+    sessionCwdReportPaths.delete(sessionId);
+    rmSync(filePath, { force: true });
+  }
 }
 
 function isPlainObject(payload: unknown): payload is Record<string, unknown> {
@@ -1057,7 +1227,7 @@ function isTrustedIpcEvent(event: IpcMainInvokeEvent) {
   return event.senderFrame ? isTrustedRendererUrl(event.senderFrame.url) : false;
 }
 
-function resolveAvailableShell(): ResolvedShell {
+function resolveAvailableShell(cwdReportPath: string): ResolvedShell {
   if (process.env.AGENTDECK_SHELL) {
     return { args: [], file: process.env.AGENTDECK_SHELL };
   }
@@ -1069,11 +1239,31 @@ function resolveAvailableShell(): ResolvedShell {
   const candidates = ["pwsh.exe", "powershell.exe", process.env.ComSpec || "cmd.exe"];
   for (const candidate of candidates) {
     if (isCommandAvailable(candidate)) {
-      return { args: [], file: candidate };
+      return withShellIntegration({ args: [], file: candidate }, cwdReportPath);
     }
   }
 
   return { args: [], file: "cmd.exe" };
+}
+
+function withShellIntegration(shell: ResolvedShell, cwdReportPath: string): ResolvedShell {
+  const shellName = basename(shell.file).toLowerCase();
+  if (shellName !== "pwsh.exe" && shellName !== "powershell.exe") {
+    return shell;
+  }
+
+  return {
+    ...shell,
+    args: [...shell.args, "-NoExit", "-Command", createPowerShellCwdIntegrationScript(cwdReportPath)],
+  };
+}
+
+function createPowerShellCwdIntegrationScript(cwdReportPath: string) {
+  return `function global:prompt { try { $p = (Get-Location).ProviderPath; if (-not $p) { $p = (Get-Location).Path }; Set-Content -LiteralPath ${quotePowerShellString(cwdReportPath)} -Value $p -NoNewline } catch {}; "PS $($executionContext.SessionState.Path.CurrentLocation)> " }`;
+}
+
+function quotePowerShellString(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function isCommandAvailable(command: string) {
@@ -1094,6 +1284,7 @@ function closeSessionsForWebContents(webContentsId: number) {
     if (ownerId === webContentsId) {
       terminalHost.closeSession(sessionId);
       sessionOwners.delete(sessionId);
+      stopCwdReportWatcher(sessionId);
     }
   }
 }

@@ -13,6 +13,7 @@ const tab = {
   panes: {
     "term-1": {
       command: "shell",
+      cwd: "D:\\projects\\AgentDeck",
       detail: "restored shell",
       id: "term-1",
       status: "ready",
@@ -28,7 +29,7 @@ const validDocument: WorkspaceDocument = {
   name: "BridgeMind",
   nextTabIndex: 2,
   nextTerminalIndex: 2,
-  settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } },
+  settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "" },
   tabs: [tab],
   version: 3,
 };
@@ -58,14 +59,21 @@ describe("workspace schema", () => {
   test("preserves workspace shared context settings", () => {
     expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: false } })).toEqual({
       ...validDocument,
-      settings: { sharedContextEnabled: false, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } },
+      settings: { sharedContextEnabled: false, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "" },
     });
   });
 
   test("preserves terminal appearance settings", () => {
     expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } } })).toEqual({
       ...validDocument,
-      settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } },
+      settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" }, terminalDefaultCwd: "" },
+    });
+  });
+
+  test("preserves terminal default cwd settings", () => {
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalDefaultCwd: "D:\\projects\\AgentDeck" } })).toEqual({
+      ...validDocument,
+      settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "D:\\projects\\AgentDeck" },
     });
   });
 
