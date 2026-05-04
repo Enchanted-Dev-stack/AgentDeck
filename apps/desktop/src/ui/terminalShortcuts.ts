@@ -7,3 +7,7 @@ export function isTerminalPasteShortcut(event: Pick<KeyboardEvent, "ctrlKey" | "
   const key = event.key.toLowerCase();
   return ((event.ctrlKey || event.metaKey) && key === "v") || (event.shiftKey && key === "insert");
 }
+
+export function isTerminalKeyboardPasteShortcut(event: Pick<KeyboardEvent, "key" | "shiftKey">) {
+  return event.shiftKey && event.key.toLowerCase() === "insert";
+}

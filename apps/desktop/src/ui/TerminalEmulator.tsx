@@ -3,7 +3,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type IDisposable, type ITerminalAddon } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { getTerminalBridge } from "../terminal/bridge.js";
-import { isTerminalCopyShortcut, isTerminalPasteShortcut } from "./terminalShortcuts.js";
+import { isTerminalCopyShortcut, isTerminalKeyboardPasteShortcut } from "./terminalShortcuts.js";
 
 const DEFAULT_TERMINAL_FONT_FAMILY = "JetBrains Mono, Cascadia Mono, Consolas, monospace";
 const TERMINAL_RENDER_DIAGNOSTIC_EVENT = "agentdeck:terminal-render-diagnostic";
@@ -84,7 +84,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
         return true;
       }
 
-      if (event.type === "keydown" && isTerminalPasteShortcut(event)) {
+      if (event.type === "keydown" && isTerminalKeyboardPasteShortcut(event)) {
         ignoreTerminalIpcError(bridge.paste(paneId));
         return false;
       }

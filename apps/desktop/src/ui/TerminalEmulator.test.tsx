@@ -1,6 +1,6 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { isTerminalCopyShortcut, isTerminalPasteShortcut } from "./terminalShortcuts.js";
+import { isTerminalCopyShortcut, isTerminalKeyboardPasteShortcut, isTerminalPasteShortcut } from "./terminalShortcuts.js";
 
 const fitMock = vi.fn();
 const contextLossDisposeMock = vi.fn();
@@ -80,9 +80,11 @@ describe("TerminalEmulator", () => {
     expect(isTerminalPasteShortcut({ ctrlKey: false, key: "V", metaKey: true, shiftKey: false })).toBe(true);
     expect(isTerminalPasteShortcut({ ctrlKey: false, key: "Insert", metaKey: false, shiftKey: true })).toBe(true);
     expect(isTerminalPasteShortcut({ ctrlKey: true, key: "c", metaKey: false, shiftKey: false })).toBe(false);
+    expect(isTerminalKeyboardPasteShortcut({ key: "Insert", shiftKey: true })).toBe(true);
+    expect(isTerminalKeyboardPasteShortcut({ key: "v", shiftKey: false })).toBe(false);
   });
 
-  test("routes paste shortcuts through the terminal paste bridge", async () => {
+  test("lets Ctrl+V fall through to the DOM paste event", async () => {
     const paste = vi.fn(() => Promise.resolve(true));
     const write = vi.fn(() => Promise.resolve(true));
     window.agentDeck = createFakeBridge({ paste, write });
@@ -91,6 +93,21 @@ describe("TerminalEmulator", () => {
 
     await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
     const handled = customKeyHandler?.(new KeyboardEvent("keydown", { ctrlKey: true, key: "v" }));
+
+    expect(handled).toBe(true);
+    expect(paste).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  test("routes Shift+Insert through the terminal paste bridge", async () => {
+    const paste = vi.fn(() => Promise.resolve(true));
+    const write = vi.fn(() => Promise.resolve(true));
+    window.agentDeck = createFakeBridge({ paste, write });
+
+    render(<TerminalEmulator cwd="" onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    const handled = customKeyHandler?.(new KeyboardEvent("keydown", { key: "Insert", shiftKey: true }));
 
     expect(handled).toBe(false);
     expect(paste).toHaveBeenCalledWith("term-1");
