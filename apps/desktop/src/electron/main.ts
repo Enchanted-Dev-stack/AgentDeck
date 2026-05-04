@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent, type OpenDialogOptions, type SaveDialogOptions } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, type IpcMainInvokeEvent, type OpenDialogOptions, type SaveDialogOptions } from "electron";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
@@ -1127,6 +1127,7 @@ function getTrustedDevRendererOrigin() {
 
 function createWindow() {
   const window = new BrowserWindow({
+    autoHideMenuBar: true,
     height: 900,
     minHeight: 640,
     minWidth: 980,
@@ -1162,6 +1163,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   registerMcpIpc();
   registerSettingsIpc();
   registerSharedStateIpc();

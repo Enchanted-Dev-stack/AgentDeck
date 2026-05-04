@@ -36,7 +36,18 @@ export interface WorkspaceDocument {
 
 export interface WorkspaceSettings {
   sharedContextEnabled: boolean;
+  terminalAppearance: WorkspaceTerminalAppearance;
 }
+
+export interface WorkspaceTerminalAppearance {
+  borders: boolean;
+  dividers: boolean;
+  shape: WorkspaceTerminalShape;
+  spacing: WorkspaceTerminalSpacing;
+}
+
+export type WorkspaceTerminalShape = "rounded" | "boxy";
+export type WorkspaceTerminalSpacing = "compact" | "comfort" | "roomy";
 
 export interface LegacyWorkspaceDocument {
   layout: WorkspaceSplitNode | null;
@@ -62,7 +73,8 @@ export interface WorkspaceDocumentInput {
   tabs: WorkspaceTab[];
 }
 
-const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = { sharedContextEnabled: true };
+const DEFAULT_TERMINAL_APPEARANCE: WorkspaceTerminalAppearance = { borders: true, dividers: true, shape: "rounded", spacing: "comfort" };
+const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = { sharedContextEnabled: true, terminalAppearance: DEFAULT_TERMINAL_APPEARANCE };
 
 const MAX_WORKSPACE_ID_LENGTH = 80;
 const MAX_WORKSPACE_TABS = 24;
@@ -164,6 +176,20 @@ function parseWorkspaceSettings(payload: unknown): WorkspaceSettings {
 
   return {
     sharedContextEnabled: typeof payload.sharedContextEnabled === "boolean" ? payload.sharedContextEnabled : DEFAULT_WORKSPACE_SETTINGS.sharedContextEnabled,
+    terminalAppearance: parseTerminalAppearance(payload.terminalAppearance),
+  };
+}
+
+function parseTerminalAppearance(payload: unknown): WorkspaceTerminalAppearance {
+  if (!isObject(payload)) {
+    return DEFAULT_TERMINAL_APPEARANCE;
+  }
+
+  return {
+    borders: typeof payload.borders === "boolean" ? payload.borders : DEFAULT_TERMINAL_APPEARANCE.borders,
+    dividers: typeof payload.dividers === "boolean" ? payload.dividers : DEFAULT_TERMINAL_APPEARANCE.dividers,
+    shape: payload.shape === "boxy" || payload.shape === "rounded" ? payload.shape : DEFAULT_TERMINAL_APPEARANCE.shape,
+    spacing: payload.spacing === "compact" || payload.spacing === "comfort" || payload.spacing === "roomy" ? payload.spacing : DEFAULT_TERMINAL_APPEARANCE.spacing,
   };
 }
 

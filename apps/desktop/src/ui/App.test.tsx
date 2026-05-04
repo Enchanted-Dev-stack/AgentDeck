@@ -156,7 +156,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 5, settings: { sharedContextEnabled: true } });
+    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 5, settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, shape: "rounded", spacing: "comfort" } } });
     expect((savedDocuments[0] as { tabs: unknown[] }).tabs).toHaveLength(1);
   });
 
@@ -171,7 +171,7 @@ describe("App", () => {
             name: "Imported",
             nextTabIndex: 10,
             nextTerminalIndex: 10,
-            settings: { sharedContextEnabled: false },
+            settings: { sharedContextEnabled: false, terminalAppearance: { borders: false, dividers: false, shape: "boxy", spacing: "roomy" } },
             tabs: [
               {
                 id: "tab-9",
@@ -195,8 +195,53 @@ describe("App", () => {
     expect(screen.queryByLabelText("OpenCode terminal")).toBeNull();
     expect(closeSession).toHaveBeenCalledWith("term-1");
     expect(closeSession).toHaveBeenCalledWith("term-4");
+    expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--boxy");
+    expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--spacing-roomy");
+    expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--no-borders");
+    expect(screen.getByLabelText("Workspace panes").className).toContain("terminal-workspace--no-dividers");
     await userEvent.setup().click(screen.getByRole("button", { name: "Settings" }));
     expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  });
+
+  test("updates terminal appearance from the floating control", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const workspace = screen.getByLabelText("Workspace panes");
+    expect(workspace.className).toContain("terminal-workspace--rounded");
+    expect(workspace.className).toContain("terminal-workspace--spacing-comfort");
+
+    await user.click(screen.getByRole("button", { name: "Terminal appearance" }));
+    await user.click(screen.getByRole("button", { name: "Boxy" }));
+    await user.click(screen.getByRole("button", { name: "Roomy" }));
+    await user.click(screen.getByRole("button", { name: "No dividers" }));
+    await user.click(screen.getByRole("button", { name: "No borders" }));
+
+    expect(workspace.className).toContain("terminal-workspace--boxy");
+    expect(workspace.className).toContain("terminal-workspace--spacing-roomy");
+    expect(workspace.className).toContain("terminal-workspace--no-dividers");
+    expect(workspace.className).toContain("terminal-workspace--no-borders");
+  });
+
+  test("saves terminal appearance with the workspace", async () => {
+    const savedDocuments: unknown[] = [];
+    const saveWorkspace = vi.fn((document: unknown) => {
+      savedDocuments.push(document);
+      return Promise.resolve(true);
+    });
+    window.agentDeck = createFakeBridge({ workspace: { importWorkspace: () => Promise.resolve(null), saveWorkspace } });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Terminal appearance" }));
+    await user.click(screen.getByRole("button", { name: "Boxy" }));
+    await user.click(screen.getByRole("button", { name: "Roomy" }));
+    await user.click(screen.getByRole("button", { name: "No dividers" }));
+    await user.click(screen.getByRole("button", { name: "No borders" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
+    expect(savedDocuments[0]).toMatchObject({ settings: { terminalAppearance: { borders: false, dividers: false, shape: "boxy", spacing: "roomy" } } });
   });
 
   test("creates and switches terminal tabs", () => {

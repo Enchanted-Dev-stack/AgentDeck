@@ -1,7 +1,7 @@
 import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Memory, MemoryType, Note, Priority, Todo, TodoStatus, Workspace } from "@agentdeck/core";
 import { getMcpBridge, getSettingsBridge, getSharedStateBridge, getTerminalBridge, getWorkspaceBridge, type AppSettings, type McpActionResult, type McpClient, type McpSetupStatus, type WorkspaceDoc, type WorkspaceDocContent } from "../terminal/bridge.js";
-import { createWorkspaceDocument } from "../workspace/schema.js";
+import { createWorkspaceDocument, type WorkspaceTerminalAppearance } from "../workspace/schema.js";
 import { AgentDeckIcon, type AgentDeckIconName } from "./Icon.js";
 import { TerminalEmulator } from "./TerminalEmulator.js";
 
@@ -66,6 +66,16 @@ const CONTEXT_MENU_MARGIN = 8;
 const ESTIMATED_CONTEXT_MENU_WIDTH = 190;
 const ESTIMATED_CONTEXT_MENU_HEIGHT = 236;
 const defaultAppSettings: AppSettings = { sharedContextEnabled: true };
+const defaultTerminalAppearance: WorkspaceTerminalAppearance = { borders: true, dividers: true, shape: "rounded", spacing: "comfort" };
+const terminalShapeOptions: Array<{ label: string; value: WorkspaceTerminalAppearance["shape"] }> = [
+  { label: "Rounded", value: "rounded" },
+  { label: "Boxy", value: "boxy" },
+];
+const terminalSpacingOptions: Array<{ label: string; value: WorkspaceTerminalAppearance["spacing"] }> = [
+  { label: "Compact", value: "compact" },
+  { label: "Comfort", value: "comfort" },
+  { label: "Roomy", value: "roomy" },
+];
 
 const navItems: Array<{ id: Page; label: string; icon: AgentDeckIconName }> = [
   { id: "terminal", label: "Terminal", icon: "terminal" },
@@ -150,6 +160,8 @@ export function App() {
   const [dismissedInstructionPrompts, setDismissedInstructionPrompts] = useState<Set<McpClient>>(new Set());
   const [instructionPromptClient, setInstructionPromptClient] = useState<McpClient | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>(defaultAppSettings);
+  const [terminalAppearance, setTerminalAppearance] = useState<WorkspaceTerminalAppearance>(defaultTerminalAppearance);
+  const [terminalAppearancePanelOpen, setTerminalAppearancePanelOpen] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
@@ -382,7 +394,7 @@ export function App() {
   }
 
   async function saveWorkspace() {
-    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, settings: appSettings, tabs: terminalState.tabs }));
+    await getWorkspaceBridge()?.saveWorkspace(createWorkspaceDocument({ activeTabId: terminalState.activeTabId, name: workspaceName, nextTabIndex: terminalState.nextTabIndex, nextTerminalIndex: terminalState.nextTerminalIndex, settings: { ...appSettings, terminalAppearance }, tabs: terminalState.tabs }));
   }
 
   async function importWorkspace() {
@@ -395,6 +407,7 @@ export function App() {
 
     setWorkspaceName(document.name);
     setTerminalState({ activeTabId: document.activeTabId, nextTabIndex: document.nextTabIndex, nextTerminalIndex: document.nextTerminalIndex, tabs: document.tabs });
+    setTerminalAppearance(document.settings.terminalAppearance ?? defaultTerminalAppearance);
     setAppSettings(document.settings);
     await getSettingsBridge()?.update(document.settings);
     if (document.settings.sharedContextEnabled) {
@@ -405,7 +418,12 @@ export function App() {
       setWorkspaceLoading(false);
     }
     clearTerminalSelection();
+    setTerminalAppearancePanelOpen(false);
     setActivePage("terminal");
+  }
+
+  function updateTerminalAppearance(nextAppearance: Partial<WorkspaceTerminalAppearance>) {
+    setTerminalAppearance((currentAppearance) => ({ ...currentAppearance, ...nextAppearance }));
   }
 
   async function loadAppSettings() {
@@ -638,9 +656,14 @@ export function App() {
                   hidden={!isActiveTab}
                   key={tab.id}
                   layout={tab.layout}
+                  appearance={terminalAppearance}
+                  appearancePanelOpen={terminalAppearancePanelOpen}
                   onAddTerminal={addTerminal}
                   onAddTerminalToSide={addTerminalToSide}
                   onCloseContextMenu={() => setContextMenu(null)}
+                  onCloseAppearancePanel={() => setTerminalAppearancePanelOpen(false)}
+                  onToggleAppearancePanel={() => setTerminalAppearancePanelOpen((isOpen) => !isOpen)}
+                  onUpdateAppearance={updateTerminalAppearance}
                   onLayoutChange={updateLayout}
                   onOpenTerminalMenu={openTerminalMenu}
                   onRenameTerminal={renameTerminal}
@@ -770,6 +793,8 @@ function TabStrip({ activeTabId, onAddTab, onCloseTab, onRenameTab, onSelectTab,
 }
 
 function TerminalWorkspace({
+  appearance,
+  appearancePanelOpen,
   canAddToContextTargets,
   contextMenu,
   contextTargets,
@@ -778,14 +803,19 @@ function TerminalWorkspace({
   onAddTerminal,
   onAddTerminalToSide,
   onCloseContextMenu,
+  onCloseAppearancePanel,
   onLayoutChange,
   onOpenTerminalMenu,
   onRenameTerminal,
   onRemoveTerminals,
   onSelectTerminal,
+  onToggleAppearancePanel,
+  onUpdateAppearance,
   panes,
   selectedTerminalIds,
 }: {
+  appearance: WorkspaceTerminalAppearance;
+  appearancePanelOpen: boolean;
   canAddToContextTargets: boolean;
   contextMenu: ContextMenuState | null;
   contextTargets: string[];
@@ -794,27 +824,43 @@ function TerminalWorkspace({
   onAddTerminal: (targetId: string | undefined, side?: TerminalSide) => void;
   onAddTerminalToSide: (targetIds: string[], side: TerminalSide) => void;
   onCloseContextMenu: () => void;
+  onCloseAppearancePanel: () => void;
   onLayoutChange: (layout: SplitNode) => void;
   onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
   onRenameTerminal: (terminalId: string) => void;
   onRemoveTerminals: (terminalIds: string[]) => void;
   onSelectTerminal: (terminalId: string, additive: boolean) => void;
+  onToggleAppearancePanel: () => void;
+  onUpdateAppearance: (appearance: Partial<WorkspaceTerminalAppearance>) => void;
   panes: Record<string, TerminalPane>;
   selectedTerminalIds: Set<string>;
 }) {
+  const appearanceClassName = `terminal-workspace terminal-workspace--${appearance.shape} terminal-workspace--spacing-${appearance.spacing} ${appearance.borders ? "terminal-workspace--borders" : "terminal-workspace--no-borders"} ${appearance.dividers ? "terminal-workspace--dividers" : "terminal-workspace--no-dividers"}`;
+
   if (!layout) {
     return (
-      <section className="terminal-workspace terminal-workspace--empty" aria-label="Workspace panes" hidden={hidden}>
+      <section className={`${appearanceClassName} terminal-workspace--empty`} aria-label="Workspace panes" hidden={hidden}>
         <button className="empty-terminal-action" onClick={() => onAddTerminal(undefined)} type="button">
           <AgentDeckIcon name="add" size={17} />
           Add terminal
         </button>
+        <TerminalAppearanceControl appearance={appearance} isOpen={appearancePanelOpen} onDismiss={onCloseAppearancePanel} onToggle={onToggleAppearancePanel} onUpdateAppearance={onUpdateAppearance} />
       </section>
     );
   }
 
   return (
-    <section aria-label="Workspace panes" aria-multiselectable="true" className="terminal-workspace" hidden={hidden} onClick={onCloseContextMenu} role="listbox">
+    <section
+      aria-label="Workspace panes"
+      aria-multiselectable="true"
+      className={appearanceClassName}
+      hidden={hidden}
+      onClick={() => {
+        onCloseContextMenu();
+        onCloseAppearancePanel();
+      }}
+      role="listbox"
+    >
       <SplitView
         node={layout}
         onOpenTerminalMenu={onOpenTerminalMenu}
@@ -825,7 +871,73 @@ function TerminalWorkspace({
         onLayoutChange={onLayoutChange}
       />
       {contextMenu ? <TerminalContextMenu canAdd={canAddToContextTargets} contextMenu={contextMenu} onAddTerminalToSide={onAddTerminalToSide} onClose={() => onRemoveTerminals(contextTargets)} onDismiss={onCloseContextMenu} onRename={onRenameTerminal} targets={contextTargets} /> : null}
+      <TerminalAppearanceControl appearance={appearance} isOpen={appearancePanelOpen} onDismiss={onCloseAppearancePanel} onToggle={onToggleAppearancePanel} onUpdateAppearance={onUpdateAppearance} />
     </section>
+  );
+}
+
+function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onToggle, onUpdateAppearance }: { appearance: WorkspaceTerminalAppearance; isOpen: boolean; onDismiss: () => void; onToggle: () => void; onUpdateAppearance: (appearance: Partial<WorkspaceTerminalAppearance>) => void }) {
+  function handlePanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    event.preventDefault();
+    onDismiss();
+  }
+
+  return (
+    <div className="terminal-appearance" onClick={(event) => event.stopPropagation()}>
+      {isOpen ? (
+        <div aria-label="Terminal appearance" className="terminal-appearance__panel" onKeyDown={handlePanelKeyDown}>
+          <fieldset>
+            <legend className="terminal-appearance__label">Edges</legend>
+            <div className="terminal-appearance__options">
+              {terminalShapeOptions.map((option) => (
+                <button aria-pressed={appearance.shape === option.value} key={option.value} onClick={() => onUpdateAppearance({ shape: option.value })} type="button">
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend className="terminal-appearance__label">Spacing</legend>
+            <div className="terminal-appearance__options">
+              {terminalSpacingOptions.map((option) => (
+                <button aria-pressed={appearance.spacing === option.value} key={option.value} onClick={() => onUpdateAppearance({ spacing: option.value })} type="button">
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend className="terminal-appearance__label">Lines</legend>
+            <div className="terminal-appearance__options">
+              <button aria-pressed={appearance.dividers} onClick={() => onUpdateAppearance({ dividers: true })} type="button">
+                Dividers
+              </button>
+              <button aria-pressed={!appearance.dividers} onClick={() => onUpdateAppearance({ dividers: false })} type="button">
+                No dividers
+              </button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend className="terminal-appearance__label">Borders</legend>
+            <div className="terminal-appearance__options">
+              <button aria-pressed={appearance.borders} onClick={() => onUpdateAppearance({ borders: true })} type="button">
+                Borders
+              </button>
+              <button aria-pressed={!appearance.borders} onClick={() => onUpdateAppearance({ borders: false })} type="button">
+                No borders
+              </button>
+            </div>
+          </fieldset>
+        </div>
+      ) : null}
+      <button aria-expanded={isOpen} aria-label="Terminal appearance" className="terminal-appearance__toggle" onClick={onToggle} title="Terminal appearance" type="button">
+        <AgentDeckIcon name="settings" size={16} />
+      </button>
+    </div>
   );
 }
 
@@ -1043,24 +1155,28 @@ function TerminalContextMenu({
   return (
     <div className="terminal-context-menu" onKeyDown={handleKeyDown} ref={menuRef} role="menu" style={{ left: menuPosition.x, top: menuPosition.y }} onClick={(event) => event.stopPropagation()}>
       <span className="terminal-context-menu__label">{canAdd ? `Add terminal beside ${label}` : "Select one attached pane group"}</span>
-      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "top")} role="menuitem" type="button">
-        Top
-      </button>
-      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "bottom")} role="menuitem" type="button">
-        Bottom
-      </button>
-      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "right")} role="menuitem" type="button">
-        Right
-      </button>
-      <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "left")} role="menuitem" type="button">
-        Left
-      </button>
-      <button disabled={targets.length !== 1} onClick={() => onRename(contextMenu.terminalId)} role="menuitem" type="button">
-        Rename
-      </button>
-      <button className="terminal-context-menu__danger" onClick={onClose} role="menuitem" type="button">
-        Close selected
-      </button>
+      <div aria-label="Add terminal" className="terminal-context-menu__group" role="group">
+        <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "top")} role="menuitem" type="button">
+          Top
+        </button>
+        <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "right")} role="menuitem" type="button">
+          Right
+        </button>
+        <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "bottom")} role="menuitem" type="button">
+          Bottom
+        </button>
+        <button disabled={!canAdd} onClick={() => onAddTerminalToSide(targets, "left")} role="menuitem" type="button">
+          Left
+        </button>
+      </div>
+      <div aria-label="Manage terminal" className="terminal-context-menu__group terminal-context-menu__group--manage" role="group">
+        <button disabled={targets.length !== 1} onClick={() => onRename(contextMenu.terminalId)} role="menuitem" type="button">
+          Rename
+        </button>
+        <button className="terminal-context-menu__danger" onClick={onClose} role="menuitem" type="button">
+          Close selected
+        </button>
+      </div>
     </div>
   );
 }
