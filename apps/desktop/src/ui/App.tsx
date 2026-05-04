@@ -1400,18 +1400,13 @@ export function insertTerminalOnSide(layout: SplitNode | null, targetIds: string
     }
 
     const nextChildren = [...layout.children];
-    const nextSizes = [...layout.sizes];
-    const newTerminalSize = selectedSize / (directTargetIndexes.length + 1);
-    const shrinkScale = selectedSize > 0 ? (selectedSize - newTerminalSize) / selectedSize : 1;
-    for (const selectedIndex of directTargetIndexes) {
-      nextSizes[selectedIndex] = (nextSizes[selectedIndex] ?? 1 / layout.children.length) * shrinkScale;
-    }
+    const nextSizes = redistributeSizesForInsert(layout.sizes, layout.children.length);
 
     const insertionIndex = insertBeforeSelection ? firstIndex : lastIndex + 1;
     return {
       ...layout,
       children: insertAt(nextChildren, insertionIndex, terminal),
-      sizes: insertAt(nextSizes, insertionIndex, newTerminalSize),
+      sizes: insertAt(nextSizes, insertionIndex, 1 / (layout.children.length + 1)),
     };
   }
 
@@ -1466,21 +1461,9 @@ export function removeTerminalFromLayout(layout: SplitNode | null, terminalId: s
     size: layout.sizes[index] ?? 1 / layout.children.length,
   }));
 
-  nextEntries.forEach((entry, index) => {
-    if (entry.child) {
-      return;
-    }
-
-    const previousIndex = findRetainedSiblingIndex(nextEntries, index, -1);
-    const nextIndex = findRetainedSiblingIndex(nextEntries, index, 1);
-    const targetIndex = previousIndex >= 0 ? previousIndex : nextIndex;
-    const targetEntry = nextEntries[targetIndex];
-    if (targetEntry) {
-      targetEntry.size += entry.size;
-    }
-  });
-
   const retainedEntries = nextEntries.filter((entry): entry is { child: SplitNode; size: number } => Boolean(entry.child));
+  const removedSize = nextEntries.reduce((total, entry) => (entry.child ? total : total + entry.size), 0);
+  redistributeRemovedSize(retainedEntries, removedSize);
   const retainedChildren = retainedEntries.map((entry) => entry.child);
   const retainedSizes = retainedEntries.map((entry) => entry.size);
 
@@ -1576,6 +1559,18 @@ function normalizeSelectionSizes(sizes: number[]) {
   return sizes.map((size) => size / totalSize);
 }
 
+function redistributeSizesForInsert(sizes: number[], existingCount: number) {
+  const newTerminalSize = 1 / (existingCount + 1);
+  const remainingSize = 1 - newTerminalSize;
+  const totalSize = sizes.reduce((sum, size) => sum + size, 0);
+
+  if (totalSize <= 0) {
+    return Array.from({ length: existingCount }, () => remainingSize / existingCount);
+  }
+
+  return sizes.map((size) => (size / totalSize) * remainingSize);
+}
+
 function containsAnyTerminal(node: SplitNode, terminalIds: string[]): boolean {
   if (node.type === "terminal") {
     return terminalIds.includes(node.id);
@@ -1612,14 +1607,23 @@ function getTerminalOrder(layout: SplitNode | null): string[] {
   return layout.children.flatMap((child) => getTerminalOrder(child));
 }
 
-function findRetainedSiblingIndex(entries: Array<{ child: SplitNode | null; size: number }>, startIndex: number, direction: -1 | 1) {
-  for (let index = startIndex + direction; index >= 0 && index < entries.length; index += direction) {
-    if (entries[index]?.child) {
-      return index;
-    }
+function redistributeRemovedSize(entries: Array<{ child: SplitNode; size: number }>, removedSize: number) {
+  if (entries.length === 0 || removedSize <= 0) {
+    return;
   }
 
-  return -1;
+  const retainedSize = entries.reduce((total, entry) => total + entry.size, 0);
+  if (retainedSize <= 0) {
+    const extraSize = removedSize / entries.length;
+    for (const entry of entries) {
+      entry.size += extraSize;
+    }
+    return;
+  }
+
+  for (const entry of entries) {
+    entry.size += removedSize * (entry.size / retainedSize);
+  }
 }
 
 function getChildStyle(parent: SplitGroup, child: SplitNode, index: number): CSSProperties {

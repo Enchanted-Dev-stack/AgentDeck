@@ -71,7 +71,7 @@ describe("App", () => {
     }
 
     expect(expandedLayout.children).toHaveLength(3);
-    expect(expandedLayout.sizes).toEqual([0.25, 0.25, 0.5]);
+    expect(expandedLayout.sizes).toEqual([0.33333333333333337, 0.3333333333333333, 0.33333333333333337]);
 
     const removedLayout = removeTerminalFromLayout(expandedLayout, "term-3");
     expect(removedLayout).not.toBeNull();
@@ -113,7 +113,25 @@ describe("App", () => {
     }
 
     expect(expandedLayout.children[0]).toEqual({ type: "terminal", id: "term-3" });
-    expect(expandedLayout.sizes).toEqual([0.25, 0.25, 0.5]);
+    expect(expandedLayout.sizes).toEqual([0.3333333333333333, 0.33333333333333337, 0.33333333333333337]);
+  });
+
+  test("preserves sibling size ratios when adding terminals", () => {
+    const layout = { ...initialSplitLayout, sizes: [0.6, 0.4] };
+    const expandedLayout = insertTerminalOnSide(layout, ["term-1"], "term-3", "right");
+
+    if (expandedLayout.type !== "split") {
+      throw new Error("Expected split layout");
+    }
+
+    expect(expandedLayout.sizes).toEqual([0.4, 0.3333333333333333, 0.2666666666666667]);
+
+    const removedLayout = removeTerminalFromLayout(expandedLayout, "term-3");
+    if (removedLayout?.type !== "split") {
+      throw new Error("Expected split layout after removal");
+    }
+
+    expect(removedLayout.sizes).toEqual([0.6, 0.4]);
   });
 
   test("opens a context menu to add and remove terminal panes", async () => {
