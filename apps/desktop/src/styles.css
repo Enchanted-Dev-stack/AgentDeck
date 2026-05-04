@@ -1031,6 +1031,41 @@ button {
   outline: none;
 }
 
+.terminal-appearance__stepper {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 34px minmax(54px, 1fr) 34px;
+}
+
+.terminal-appearance__stepper button {
+  background: #121923;
+  border: 1px solid #2b3544;
+  border-radius: 12px;
+  color: #cfd5dd;
+  cursor: pointer;
+  height: 30px;
+}
+
+.terminal-appearance__stepper button:disabled {
+  color: #525b68;
+  cursor: not-allowed;
+}
+
+.terminal-appearance__stepper button:not(:disabled):hover,
+.terminal-appearance__stepper button:not(:disabled):focus-visible {
+  border-color: #526078;
+  color: #f3f5f7;
+  outline: none;
+}
+
+.terminal-appearance__stepper span {
+  color: #d8dce2;
+  font-family: var(--terminal-font-family, var(--font-mono));
+  font-size: 12px;
+  text-align: center;
+}
+
 .terminal-appearance__action {
   background: rgba(7, 9, 13, 0.68);
   border: 1px solid #222a36;

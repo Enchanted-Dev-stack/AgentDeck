@@ -29,7 +29,7 @@ const validDocument: WorkspaceDocument = {
   name: "BridgeMind",
   nextTabIndex: 2,
   nextTerminalIndex: 2,
-  settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "" },
+  settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "cascadia", fontSize: 12, shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "" },
   tabs: [tab],
   version: 3,
 };
@@ -59,21 +59,33 @@ describe("workspace schema", () => {
   test("preserves workspace shared context settings", () => {
     expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: false } })).toEqual({
       ...validDocument,
-      settings: { sharedContextEnabled: false, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "" },
+      settings: { sharedContextEnabled: false, terminalAppearance: { borders: true, dividers: true, font: "cascadia", fontSize: 12, shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "" },
     });
   });
 
   test("preserves terminal appearance settings", () => {
-    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } } })).toEqual({
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", fontSize: 15, shape: "boxy", spacing: "roomy" } } })).toEqual({
       ...validDocument,
-      settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" }, terminalDefaultCwd: "" },
+      settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: false, font: "consolas", fontSize: 15, shape: "boxy", spacing: "roomy" }, terminalDefaultCwd: "" },
+    });
+  });
+
+  test("defaults and clamps terminal font size settings", () => {
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { fontSize: 100 } } })).toMatchObject({
+      settings: { terminalAppearance: { fontSize: 22 } },
+    });
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: { fontSize: 4 } } })).toMatchObject({
+      settings: { terminalAppearance: { fontSize: 9 } },
+    });
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: {} } })).toMatchObject({
+      settings: { terminalAppearance: { fontSize: 12 } },
     });
   });
 
   test("preserves terminal default cwd settings", () => {
     expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalDefaultCwd: "D:\\projects\\AgentDeck" } })).toEqual({
       ...validDocument,
-      settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "D:\\projects\\AgentDeck" },
+      settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "cascadia", fontSize: 12, shape: "rounded", spacing: "comfort" }, terminalDefaultCwd: "D:\\projects\\AgentDeck" },
     });
   });
 

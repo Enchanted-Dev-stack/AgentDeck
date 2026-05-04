@@ -6,10 +6,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("./TerminalEmulator.js", () => ({
-  TerminalEmulator: ({ cwd, onCwdChange, paneId }: { cwd?: string; onCwdChange?: (cwd: string) => void; paneId: string }) => <div data-cwd={cwd} data-testid={`terminal-emulator-${paneId}`} onClick={() => onCwdChange?.(`D:\\${paneId}`)} />,
+  TerminalEmulator: ({ cwd, fontSize, onCwdChange, onFontSizeChange, paneId }: { cwd?: string; fontSize?: number; onCwdChange?: (cwd: string) => void; onFontSizeChange?: (fontSize: number) => void; paneId: string }) => <div data-cwd={cwd} data-font-size={fontSize} data-testid={`terminal-emulator-${paneId}`} onClick={() => onCwdChange?.(`D:\\${paneId}`)} onWheel={(event) => event.ctrlKey && onFontSizeChange?.((fontSize ?? 12) + (event.deltaY < 0 ? 1 : -1))} />,
 }));
 
-import { App, canInsertTerminalOnSide, getClampedContextMenuPosition, getTerminalRange, initialSplitLayout, insertTerminal, insertTerminalOnSide, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
+import { App, canInsertTerminalOnSide, clampTerminalFontSize, getClampedContextMenuPosition, getTerminalRange, initialSplitLayout, insertTerminal, insertTerminalOnSide, removeTerminalFromLayout, resizeAdjacentSizes, resizeSplitGroup } from "./App.js";
 
 afterEach(() => cleanup());
 afterEach(() => {
@@ -105,6 +105,12 @@ describe("App", () => {
     expect(getClampedContextMenuPosition(-20, -12, 190, 236, 800, 600)).toEqual({ x: 8, y: 8 });
   });
 
+  test("clamps terminal font size", () => {
+    expect(clampTerminalFontSize(100)).toBe(22);
+    expect(clampTerminalFontSize(4)).toBe(9);
+    expect(clampTerminalFontSize(12.6)).toBe(13);
+  });
+
   test("inserts terminals to the requested side", () => {
     const expandedLayout = insertTerminalOnSide(initialSplitLayout, ["term-1"], "term-3", "left");
 
@@ -175,7 +181,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 3, settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" } } });
+    expect(savedDocuments[0]).toMatchObject({ activeTabId: "tab-1", name: "AgentDeck Workspace", nextTabIndex: 2, version: 3, nextTerminalIndex: 3, settings: { sharedContextEnabled: true, terminalAppearance: { borders: true, dividers: true, font: "cascadia", fontSize: 12, shape: "rounded", spacing: "comfort" } } });
     expect((savedDocuments[0] as { tabs: unknown[] }).tabs).toHaveLength(1);
   });
 
@@ -192,7 +198,7 @@ describe("App", () => {
             name: "Imported",
             nextTabIndex: 10,
             nextTerminalIndex: 10,
-            settings: { sharedContextEnabled: false, terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" }, terminalDefaultCwd: "D:\\imported-default" },
+            settings: { sharedContextEnabled: false, terminalAppearance: { borders: false, dividers: false, font: "consolas", fontSize: 15, shape: "boxy", spacing: "roomy" }, terminalDefaultCwd: "D:\\imported-default" },
             tabs: [
               {
                 id: "tab-9",
@@ -236,7 +242,7 @@ describe("App", () => {
             name: "Autosaved",
             nextTabIndex: 10,
             nextTerminalIndex: 10,
-            settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: true, font: "system", shape: "boxy", spacing: "compact" }, terminalDefaultCwd: "D:\\autosaved-default" },
+            settings: { sharedContextEnabled: true, terminalAppearance: { borders: false, dividers: true, font: "system", fontSize: 14, shape: "boxy", spacing: "compact" }, terminalDefaultCwd: "D:\\autosaved-default" },
             tabs: [
               {
                 id: "tab-9",
@@ -295,6 +301,7 @@ describe("App", () => {
 
     const workspace = screen.getByLabelText("Workspace panes");
     expect(workspace.className).toContain("terminal-workspace--rounded");
+    expect(workspace.className).toContain("terminal-workspace--font-cascadia");
     expect(workspace.className).toContain("terminal-workspace--spacing-comfort");
 
     await user.click(screen.getByRole("button", { name: "Terminal appearance" }));
@@ -309,6 +316,20 @@ describe("App", () => {
     expect(workspace.className).toContain("terminal-workspace--spacing-roomy");
     expect(workspace.className).toContain("terminal-workspace--no-dividers");
     expect(workspace.className).toContain("terminal-workspace--no-borders");
+  });
+
+  test("updates terminal font size from controls and Ctrl wheel", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("12");
+
+    await user.click(screen.getByRole("button", { name: "Terminal appearance" }));
+    await user.click(screen.getByRole("button", { name: "Increase terminal font size" }));
+    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("13");
+
+    fireEvent.wheel(screen.getByTestId("terminal-emulator-term-1"), { ctrlKey: true, deltaY: -100 });
+    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("14");
   });
 
   test("saves terminal appearance with the workspace", async () => {
@@ -330,7 +351,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
-    expect(savedDocuments[0]).toMatchObject({ settings: { terminalAppearance: { borders: false, dividers: false, font: "consolas", shape: "boxy", spacing: "roomy" } } });
+    expect(savedDocuments[0]).toMatchObject({ settings: { terminalAppearance: { borders: false, dividers: false, font: "consolas", fontSize: 12, shape: "boxy", spacing: "roomy" } } });
   });
 
   test("uses the configured default path for newly spawned terminals", async () => {

@@ -5,10 +5,12 @@ import { useEffect, useRef } from "react";
 import { getTerminalBridge } from "../terminal/bridge.js";
 import { isTerminalCopyShortcut, isTerminalKeyboardPasteShortcut } from "./terminalShortcuts.js";
 
-const DEFAULT_TERMINAL_FONT_FAMILY = "JetBrains Mono, Cascadia Mono, Consolas, monospace";
+const DEFAULT_TERMINAL_FONT_FAMILY = "Cascadia Mono, JetBrains Mono, Consolas, monospace";
 const TERMINAL_RENDER_DIAGNOSTIC_EVENT = "agentdeck:terminal-render-diagnostic";
 const TERMINAL_RENDER_OPTIONS_EVENT = "agentdeck:terminal-render-options";
 const DEFAULT_TERMINAL_FONT_SIZE = 12;
+const MIN_TERMINAL_FONT_SIZE = 9;
+const MAX_TERMINAL_FONT_SIZE = 22;
 const TERMINAL_RENDER_DIAGNOSTIC_SAMPLE = [
   "\r\n\x1b[1;36mAgentDeck xterm render diagnostic\x1b[0m\r\n",
   "background cells: ",
@@ -28,14 +30,33 @@ export function updateTerminalRenderOptions(options: { customGlyphs?: boolean; f
   window.dispatchEvent(new CustomEvent(TERMINAL_RENDER_OPTIONS_EVENT, { detail: options }));
 }
 
-export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, onCwdChange, paneId }: { cwd: string; fontFamily?: string; onCwdChange: (cwd: string) => void; paneId: string }) {
+export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMILY, fontSize = DEFAULT_TERMINAL_FONT_SIZE, onCwdChange, onFontSizeChange, paneId }: { cwd: string; fontFamily?: string; fontSize?: number; onCwdChange: (cwd: string) => void; onFontSizeChange?: (fontSize: number) => void; paneId: string }) {
   const terminalElementRef = useRef<HTMLDivElement>(null);
   const initialCwdRef = useRef(cwd);
+  const fontSizeRef = useRef(clampTerminalFontSize(fontSize));
   const onCwdChangeRef = useRef(onCwdChange);
+  const onFontSizeChangeRef = useRef(onFontSizeChange);
+  const resizeTerminalRef = useRef(() => undefined as void);
+  const terminalRef = useRef<Terminal | null>(null);
 
   useEffect(() => {
     onCwdChangeRef.current = onCwdChange;
   }, [onCwdChange]);
+
+  useEffect(() => {
+    onFontSizeChangeRef.current = onFontSizeChange;
+  }, [onFontSizeChange]);
+
+  useEffect(() => {
+    const nextFontSize = clampTerminalFontSize(fontSize);
+    fontSizeRef.current = nextFontSize;
+    if (!terminalRef.current) {
+      return;
+    }
+
+    terminalRef.current.options = { fontSize: nextFontSize };
+    resizeTerminalRef.current();
+  }, [fontSize]);
 
   useEffect(() => {
     const bridge = getTerminalBridge();
@@ -53,7 +74,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       customGlyphs: true,
       cursorBlink: true,
       fontFamily,
-      fontSize: DEFAULT_TERMINAL_FONT_SIZE,
+      fontSize: fontSizeRef.current,
       letterSpacing: 0,
       lineHeight: 1,
       theme: {
@@ -67,6 +88,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
     let rendererAddon: ITerminalAddon | undefined;
     terminal.loadAddon(fitAddon);
     terminal.open(terminalElement);
+    terminalRef.current = terminal;
     const contextLossDisposable = loadRendererAddon(terminal, (addon) => {
       rendererAddon = addon;
     });
@@ -97,6 +119,22 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       ignoreTerminalIpcError(bridge.paste(paneId));
     };
     terminalElement.addEventListener("paste", pasteFromEvent);
+
+    const zoomFontFromWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey || event.deltaY === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      const nextFontSize = clampTerminalFontSize(fontSizeRef.current + (event.deltaY < 0 ? 1 : -1));
+      if (nextFontSize !== fontSizeRef.current) {
+        fontSizeRef.current = nextFontSize;
+        terminal.options = { fontSize: nextFontSize };
+        resizeTerminalRef.current();
+        onFontSizeChangeRef.current?.(nextFontSize);
+      }
+    };
+    terminalElement.addEventListener("wheel", zoomFontFromWheel, { passive: false });
 
     const writeRenderDiagnostic = (event: Event) => {
       const targetPaneId = event instanceof CustomEvent && typeof event.detail?.paneId === "string" ? event.detail.paneId : undefined;
@@ -143,6 +181,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       fitAddon.fit();
       ignoreTerminalIpcError(bridge.resize(paneId, terminal.cols, terminal.rows));
     };
+    resizeTerminalRef.current = resizePty;
 
     const scheduleResize = () => {
       window.clearTimeout(resizeTimer);
@@ -202,6 +241,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       window.removeEventListener(TERMINAL_RENDER_OPTIONS_EVENT, updateRenderOptions);
       window.removeEventListener(TERMINAL_RENDER_DIAGNOSTIC_EVENT, writeRenderDiagnostic);
       terminalElement.removeEventListener("paste", pasteFromEvent);
+      terminalElement.removeEventListener("wheel", zoomFontFromWheel);
       terminalElement.removeEventListener("pointerdown", focusTerminal);
       removeCwdListener();
       removeDataListener();
@@ -209,6 +249,8 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       inputDisposable.dispose();
       rendererAddon?.dispose();
       terminal.dispose();
+      resizeTerminalRef.current = () => undefined;
+      terminalRef.current = null;
     };
   }, [fontFamily, paneId]);
 
@@ -221,6 +263,10 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
   }
 
   return <div className="terminal-emulator" ref={terminalElementRef} />;
+}
+
+export function clampTerminalFontSize(fontSize: number) {
+  return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(fontSize)));
 }
 
 function ignoreTerminalIpcError(request: Promise<boolean>) {

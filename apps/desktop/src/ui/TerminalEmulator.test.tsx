@@ -11,6 +11,7 @@ const terminalHasSelectionMock = vi.fn(() => false);
 const terminalLoadAddonMock = vi.fn();
 const terminalWriteMock = vi.fn();
 const webglDisposeMock = vi.fn();
+let terminalConstructorOptions: unknown[] = [];
 let terminalOptionsUpdates: unknown[] = [];
 let customKeyHandler: ((event: KeyboardEvent) => boolean) | undefined;
 let contextLossHandler: (() => void) | undefined;
@@ -30,7 +31,8 @@ vi.mock("@xterm/addon-webgl", () => ({
 }));
 
 vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn(() => {
+  Terminal: vi.fn((options: unknown) => {
+    terminalConstructorOptions.push(options);
     const terminal = {
       attachCustomKeyEventHandler: (handler: (event: KeyboardEvent) => boolean) => {
         customKeyHandler = handler;
@@ -60,6 +62,7 @@ describe("TerminalEmulator", () => {
   beforeEach(() => {
     customKeyHandler = undefined;
     contextLossHandler = undefined;
+    terminalConstructorOptions = [];
     terminalOptionsUpdates = [];
     terminalGetSelectionMock.mockReturnValue("");
     terminalHasSelectionMock.mockReturnValue(false);
@@ -158,6 +161,44 @@ describe("TerminalEmulator", () => {
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(paste).toHaveBeenCalledWith("term-1");
     expect(write).not.toHaveBeenCalled();
+  });
+
+  test("applies configured terminal font size and reports Ctrl wheel zoom", async () => {
+    const onFontSizeChange = vi.fn();
+    const { container } = render(<TerminalEmulator cwd="" fontSize={13} onCwdChange={() => undefined} onFontSizeChange={onFontSizeChange} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    expect(terminalConstructorOptions).toContainEqual(expect.objectContaining({ fontSize: 13 }));
+
+    const wheelEvent = new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100 });
+    container.firstElementChild?.dispatchEvent(wheelEvent);
+
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(onFontSizeChange).toHaveBeenCalledWith(14);
+  });
+
+  test("applies consecutive Ctrl wheel font zoom steps before rerender", async () => {
+    const onFontSizeChange = vi.fn();
+    const { container } = render(<TerminalEmulator cwd="" fontSize={13} onCwdChange={() => undefined} onFontSizeChange={onFontSizeChange} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    container.firstElementChild?.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100 }));
+    container.firstElementChild?.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100 }));
+
+    expect(onFontSizeChange).toHaveBeenNthCalledWith(1, 14);
+    expect(onFontSizeChange).toHaveBeenNthCalledWith(2, 15);
+    expect(terminalOptionsUpdates).toContainEqual({ fontSize: 14 });
+    expect(terminalOptionsUpdates).toContainEqual({ fontSize: 15 });
+  });
+
+  test("updates terminal font size without recreating the session", async () => {
+    const { rerender } = render(<TerminalEmulator cwd="" fontSize={12} onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalledTimes(1));
+    rerender(<TerminalEmulator cwd="" fontSize={16} onCwdChange={() => undefined} paneId="term-1" />);
+
+    expect(terminalOptionsUpdates).toContainEqual({ fontSize: 16 });
+    expect(window.agentDeck?.terminal.createSession).toHaveBeenCalledTimes(1);
   });
 
   test("writes the direct xterm render diagnostic sample", async () => {

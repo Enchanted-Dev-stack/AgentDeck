@@ -65,11 +65,13 @@ const MIN_PANE_HEIGHT = 140;
 const MAX_PANE_TITLE_LENGTH = 80;
 const WORKSPACE_AUTOSAVE_DELAY_MS = 500;
 const MAX_TERMINAL_CWD_LENGTH = 4096;
+const MIN_TERMINAL_FONT_SIZE = 9;
+const MAX_TERMINAL_FONT_SIZE = 22;
 const CONTEXT_MENU_MARGIN = 8;
 const ESTIMATED_CONTEXT_MENU_WIDTH = 190;
 const ESTIMATED_CONTEXT_MENU_HEIGHT = 236;
 const defaultAppSettings: AppSettings = { sharedContextEnabled: true };
-const defaultTerminalAppearance: WorkspaceTerminalAppearance = { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" };
+const defaultTerminalAppearance: WorkspaceTerminalAppearance = { borders: true, dividers: true, font: "cascadia", fontSize: 12, shape: "rounded", spacing: "comfort" };
 const terminalFontFamilies: Record<WorkspaceTerminalAppearance["font"], string> = {
   cascadia: "Cascadia Mono, JetBrains Mono, Consolas, monospace",
   consolas: "Consolas, Cascadia Mono, JetBrains Mono, monospace",
@@ -435,7 +437,7 @@ export function App() {
   }
 
   function updateTerminalAppearance(nextAppearance: Partial<WorkspaceTerminalAppearance>) {
-    setTerminalAppearance((currentAppearance) => ({ ...currentAppearance, ...nextAppearance }));
+    setTerminalAppearance((currentAppearance) => ({ ...currentAppearance, ...nextAppearance, fontSize: nextAppearance.fontSize === undefined ? currentAppearance.fontSize : clampTerminalFontSize(nextAppearance.fontSize) }));
   }
 
   function updateTerminalDefaultCwd(nextCwd: string) {
@@ -946,6 +948,7 @@ function TerminalWorkspace({
         appearance={appearance}
         onOpenTerminalMenu={onOpenTerminalMenu}
         onSelectTerminal={onSelectTerminal}
+        onFontSizeChange={(fontSize) => onUpdateAppearance({ fontSize })}
         onTerminalCwdChange={onTerminalCwdChange}
         panes={panes}
         rootLayout={layout}
@@ -990,6 +993,18 @@ function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onSelectTerm
                   {option.label}
                 </button>
               ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend className="terminal-appearance__label">Font size</legend>
+            <div className="terminal-appearance__stepper" aria-label="Terminal font size">
+              <button aria-label="Decrease terminal font size" disabled={appearance.fontSize <= MIN_TERMINAL_FONT_SIZE} onClick={() => onUpdateAppearance({ fontSize: appearance.fontSize - 1 })} type="button">
+                -
+              </button>
+              <span>{appearance.fontSize}px</span>
+              <button aria-label="Increase terminal font size" disabled={appearance.fontSize >= MAX_TERMINAL_FONT_SIZE} onClick={() => onUpdateAppearance({ fontSize: appearance.fontSize + 1 })} type="button">
+                +
+              </button>
             </div>
           </fieldset>
           <fieldset>
@@ -1043,11 +1058,6 @@ function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onSelectTerm
               <button onClick={() => updateTerminalRenderOptions({ customGlyphs: false })} type="button">
                 Glyphs off
               </button>
-              {[11, 12, 13, 14].map((fontSize) => (
-                <button key={fontSize} onClick={() => updateTerminalRenderOptions({ fontSize })} type="button">
-                  {fontSize}px
-                </button>
-              ))}
             </div>
             <button className="terminal-appearance__action" onClick={() => requestTerminalRenderDiagnostic()} type="button">
               Run render test
@@ -1066,6 +1076,7 @@ function SplitView({
   appearance,
   node,
   onLayoutChange,
+  onFontSizeChange,
   onOpenTerminalMenu,
   onSelectTerminal,
   onTerminalCwdChange,
@@ -1077,6 +1088,7 @@ function SplitView({
   appearance: WorkspaceTerminalAppearance;
   node: SplitNode;
   onLayoutChange: (layout: SplitNode) => void;
+  onFontSizeChange: (fontSize: number) => void;
   onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
   onSelectTerminal: (terminalId: string, additive: boolean) => void;
   onTerminalCwdChange: (terminalId: string, cwd: string) => void;
@@ -1086,14 +1098,14 @@ function SplitView({
   selectedTerminalIds: Set<string>;
 }) {
   if (node.type === "terminal") {
-    return <TerminalPaneView fontFamily={terminalFontFamilies[appearance.font]} isSelected={selectedTerminalIds.has(node.id)} key={`${sessionRevision}:${node.id}`} onCwdChange={onTerminalCwdChange} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
+    return <TerminalPaneView fontFamily={terminalFontFamilies[appearance.font]} fontSize={appearance.fontSize} isSelected={selectedTerminalIds.has(node.id)} key={`${sessionRevision}:${node.id}`} onCwdChange={onTerminalCwdChange} onFontSizeChange={onFontSizeChange} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
   }
 
   return (
     <div className={`split split--${node.direction}`} data-split-id={node.id}>
       {node.children.map((child, index) => (
         <div className="split__child" key={getNodeKey(child)} style={getChildStyle(node, child, index)}>
-          <SplitView appearance={appearance} node={child} onLayoutChange={onLayoutChange} onOpenTerminalMenu={onOpenTerminalMenu} onSelectTerminal={onSelectTerminal} onTerminalCwdChange={onTerminalCwdChange} panes={panes} rootLayout={rootLayout} sessionRevision={sessionRevision} selectedTerminalIds={selectedTerminalIds} />
+          <SplitView appearance={appearance} node={child} onFontSizeChange={onFontSizeChange} onLayoutChange={onLayoutChange} onOpenTerminalMenu={onOpenTerminalMenu} onSelectTerminal={onSelectTerminal} onTerminalCwdChange={onTerminalCwdChange} panes={panes} rootLayout={rootLayout} sessionRevision={sessionRevision} selectedTerminalIds={selectedTerminalIds} />
           {index < node.children.length - 1 ? <ResizeSash direction={node.direction} group={node} index={index} onLayoutChange={onLayoutChange} rootLayout={rootLayout} /> : null}
         </div>
       ))}
@@ -1185,7 +1197,7 @@ function ResizeSash({
   );
 }
 
-function TerminalPaneView({ fontFamily, isSelected, onCwdChange, onOpenMenu, onSelect, pane }: { fontFamily: string; isSelected: boolean; onCwdChange: (terminalId: string, cwd: string) => void; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
+function TerminalPaneView({ fontFamily, fontSize, isSelected, onCwdChange, onFontSizeChange, onOpenMenu, onSelect, pane }: { fontFamily: string; fontSize: number; isSelected: boolean; onCwdChange: (terminalId: string, cwd: string) => void; onFontSizeChange: (fontSize: number) => void; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
   if (!pane) {
     return null;
   }
@@ -1237,7 +1249,7 @@ function TerminalPaneView({ fontFamily, isSelected, onCwdChange, onOpenMenu, onS
         </span>
       </header>
       <div className="terminal-pane__body">
-        <TerminalEmulator cwd={terminalPane.cwd} fontFamily={fontFamily} onCwdChange={(cwd) => onCwdChange(terminalPane.id, cwd)} paneId={terminalPane.id} />
+        <TerminalEmulator cwd={terminalPane.cwd} fontFamily={fontFamily} fontSize={fontSize} onCwdChange={(cwd) => onCwdChange(terminalPane.id, cwd)} onFontSizeChange={onFontSizeChange} paneId={terminalPane.id} />
       </div>
     </article>
   );
@@ -1317,6 +1329,10 @@ export function getClampedContextMenuPosition(x: number, y: number, width: numbe
     x: Math.min(Math.max(CONTEXT_MENU_MARGIN, x), Math.max(CONTEXT_MENU_MARGIN, viewportWidth - width - CONTEXT_MENU_MARGIN)),
     y: Math.min(Math.max(CONTEXT_MENU_MARGIN, y), Math.max(CONTEXT_MENU_MARGIN, viewportHeight - height - CONTEXT_MENU_MARGIN)),
   };
+}
+
+export function clampTerminalFontSize(fontSize: number) {
+  return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(fontSize)));
 }
 
 export function resizeSplitGroup(layout: SplitNode, groupId: string, index: number, deltaPixels: number, totalPixels: number, minBeforePixels: number, minAfterPixels = minBeforePixels): SplitNode {

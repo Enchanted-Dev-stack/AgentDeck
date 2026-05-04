@@ -45,6 +45,7 @@ export interface WorkspaceTerminalAppearance {
   borders: boolean;
   dividers: boolean;
   font: WorkspaceTerminalFont;
+  fontSize: number;
   shape: WorkspaceTerminalShape;
   spacing: WorkspaceTerminalSpacing;
 }
@@ -77,7 +78,10 @@ export interface WorkspaceDocumentInput {
   tabs: WorkspaceTab[];
 }
 
-const DEFAULT_TERMINAL_APPEARANCE: WorkspaceTerminalAppearance = { borders: true, dividers: true, font: "jetbrains", shape: "rounded", spacing: "comfort" };
+const DEFAULT_TERMINAL_FONT_SIZE = 12;
+const MIN_TERMINAL_FONT_SIZE = 9;
+const MAX_TERMINAL_FONT_SIZE = 22;
+const DEFAULT_TERMINAL_APPEARANCE: WorkspaceTerminalAppearance = { borders: true, dividers: true, font: "cascadia", fontSize: DEFAULT_TERMINAL_FONT_SIZE, shape: "rounded", spacing: "comfort" };
 const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = { sharedContextEnabled: true, terminalAppearance: DEFAULT_TERMINAL_APPEARANCE, terminalDefaultCwd: "" };
 
 const MAX_WORKSPACE_ID_LENGTH = 80;
@@ -194,9 +198,18 @@ function parseTerminalAppearance(payload: unknown): WorkspaceTerminalAppearance 
     borders: typeof payload.borders === "boolean" ? payload.borders : DEFAULT_TERMINAL_APPEARANCE.borders,
     dividers: typeof payload.dividers === "boolean" ? payload.dividers : DEFAULT_TERMINAL_APPEARANCE.dividers,
     font: payload.font === "jetbrains" || payload.font === "cascadia" || payload.font === "consolas" || payload.font === "system" ? payload.font : DEFAULT_TERMINAL_APPEARANCE.font,
+    fontSize: parseTerminalFontSize(payload.fontSize),
     shape: payload.shape === "boxy" || payload.shape === "rounded" ? payload.shape : DEFAULT_TERMINAL_APPEARANCE.shape,
     spacing: payload.spacing === "compact" || payload.spacing === "comfort" || payload.spacing === "roomy" ? payload.spacing : DEFAULT_TERMINAL_APPEARANCE.spacing,
   };
+}
+
+function parseTerminalFontSize(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_TERMINAL_APPEARANCE.fontSize;
+  }
+
+  return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(value)));
 }
 
 function parseWorkspaceTab(payload: unknown): WorkspaceTab | null {
