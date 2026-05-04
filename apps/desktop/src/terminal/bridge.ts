@@ -8,6 +8,7 @@ export const terminalChannels = {
   cwd: "terminal:cwd",
   data: "terminal:data",
   exit: "terminal:exit",
+  paste: "terminal:paste",
   resize: "terminal:resize",
   write: "terminal:write",
 } as const;
@@ -92,6 +93,7 @@ export interface TerminalBridge {
   onCwd: (listener: (event: TerminalCwdEvent) => void) => () => void;
   onData: (listener: (event: TerminalDataEvent) => void) => () => void;
   onExit: (listener: (event: TerminalExitEvent) => void) => () => void;
+  paste: (id: string) => Promise<boolean>;
   resize: (id: string, cols: number, rows: number) => Promise<boolean>;
   write: (id: string, data: string) => Promise<boolean>;
 }

@@ -2,6 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { getTerminalBridge } from "../terminal/bridge.js";
+import { isTerminalPasteShortcut } from "./terminalShortcuts.js";
 
 const DEFAULT_TERMINAL_FONT_FAMILY = "JetBrains Mono, Cascadia Mono, Consolas, monospace";
 
@@ -44,6 +45,23 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
     terminal.loadAddon(fitAddon);
     terminal.open(terminalElement);
 
+    const focusTerminal = () => terminal.focus();
+    terminalElement.addEventListener("pointerdown", focusTerminal);
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === "keydown" && isTerminalPasteShortcut(event)) {
+        ignoreTerminalIpcError(bridge.paste(paneId));
+        return false;
+      }
+
+      return true;
+    });
+
+    const pasteFromEvent = (event: ClipboardEvent) => {
+      event.preventDefault();
+      ignoreTerminalIpcError(bridge.paste(paneId));
+    };
+    terminalElement.addEventListener("paste", pasteFromEvent);
+
     const resizePty = () => {
       if (terminalElement.clientWidth === 0 || terminalElement.clientHeight === 0) {
         return;
@@ -83,6 +101,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       }
 
       resizePty();
+      terminal.focus();
       sessionCreated = true;
       return bridge.createSession({ cols: terminal.cols, cwd: initialCwdRef.current || undefined, id: paneId, rows: terminal.rows });
     }).then((created) => {
@@ -106,6 +125,8 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       disposed = true;
       window.clearTimeout(resizeTimer);
       observer?.disconnect();
+      terminalElement.removeEventListener("paste", pasteFromEvent);
+      terminalElement.removeEventListener("pointerdown", focusTerminal);
       removeCwdListener();
       removeDataListener();
       removeExitListener();

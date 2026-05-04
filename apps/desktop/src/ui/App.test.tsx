@@ -971,6 +971,7 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
       onCwd: () => () => undefined,
       onData: () => () => undefined,
       onExit: () => () => undefined,
+      paste: () => Promise.resolve(true),
       resize: () => Promise.resolve(true),
       write: () => Promise.resolve(true),
       ...terminalOverrides,

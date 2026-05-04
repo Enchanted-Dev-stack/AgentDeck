@@ -14,6 +14,7 @@ import { mcpChannels, settingsChannels, sharedStateChannels, terminalChannels, w
 import { parseWorkspaceDocument } from "../workspace/schema.js";
 
 const MAX_TERMINAL_ID_LENGTH = 80;
+const MAX_TERMINAL_PASTE_LENGTH = 1_000_000;
 const MAX_TERMINAL_WRITE_LENGTH = 16_384;
 const MAX_WORKSPACE_FILE_BYTES = 1_000_000;
 const WORKSPACE_AUTOSAVE_FILE_NAME = "agentdeck-workspace-autosave.json";
@@ -109,6 +110,19 @@ function registerTerminalIpc() {
     }
 
     return terminalHost.write(id, dataPayload);
+  });
+  ipcMain.handle(terminalChannels.paste, (event, idPayload: unknown) => {
+    const id = parseTerminalId(idPayload);
+    if (!id || !isTrustedSessionOwner(event, id)) {
+      return false;
+    }
+
+    const text = clipboard.readText();
+    if (!text || text.length > MAX_TERMINAL_PASTE_LENGTH) {
+      return false;
+    }
+
+    return terminalHost.write(id, text);
   });
   ipcMain.handle(terminalChannels.resize, (event, idPayload: unknown, colsPayload: unknown, rowsPayload: unknown) => {
     const id = parseTerminalId(idPayload);
