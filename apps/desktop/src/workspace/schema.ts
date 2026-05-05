@@ -19,6 +19,7 @@ export interface WorkspaceTerminalPane {
   command: string;
   cwd: string;
   detail: string;
+  fontSize: number;
   id: string;
   status: string;
   title: string;
@@ -120,9 +121,10 @@ export function parseWorkspaceDocument(payload: unknown): WorkspaceDocument | nu
     return null;
   }
 
+  const settings = payload.version === 3 ? parseWorkspaceSettings(payload.settings) : DEFAULT_WORKSPACE_SETTINGS;
   const tabIds = new Set<string>();
   const terminalIds = new Set<string>();
-  const tabs = payload.tabs.map((tabPayload) => parseWorkspaceTab(tabPayload));
+  const tabs = payload.tabs.map((tabPayload) => parseWorkspaceTab(tabPayload, settings.terminalAppearance.fontSize));
   if (tabs.some((tab) => tab === null)) {
     return null;
   }
@@ -151,7 +153,7 @@ export function parseWorkspaceDocument(payload: unknown): WorkspaceDocument | nu
     name: payload.name,
     nextTabIndex: payload.nextTabIndex,
     nextTerminalIndex: payload.nextTerminalIndex,
-    settings: payload.version === 3 ? parseWorkspaceSettings(payload.settings) : DEFAULT_WORKSPACE_SETTINGS,
+    settings,
     tabs: tabs as WorkspaceTab[],
   });
 }
@@ -162,7 +164,7 @@ function parseLegacyWorkspaceDocument(payload: Record<string, unknown>): Workspa
   }
 
   const nextTerminalIndex = payload.nextTerminalIndex;
-  const tab = parseWorkspaceTab({ id: "tab-1", layout: payload.layout, panes: payload.panes, title: "Main" });
+  const tab = parseWorkspaceTab({ id: "tab-1", layout: payload.layout, panes: payload.panes, title: "Main" }, DEFAULT_WORKSPACE_SETTINGS.terminalAppearance.fontSize);
   if (!tab) {
     return null;
   }
@@ -212,12 +214,12 @@ function parseTerminalFontSize(value: unknown) {
   return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(value)));
 }
 
-function parseWorkspaceTab(payload: unknown): WorkspaceTab | null {
+function parseWorkspaceTab(payload: unknown, defaultFontSize: number): WorkspaceTab | null {
   if (!isObject(payload) || !isValidWorkspaceId(payload.id) || typeof payload.title !== "string" || !isObject(payload.panes)) {
     return null;
   }
 
-  const panes = parsePanes(payload.panes);
+  const panes = parsePanes(payload.panes, defaultFontSize);
   if (!panes) {
     return null;
   }
@@ -245,7 +247,7 @@ function parseWorkspaceTab(payload: unknown): WorkspaceTab | null {
   };
 }
 
-function parsePanes(payload: Record<string, unknown>) {
+function parsePanes(payload: Record<string, unknown>, defaultFontSize: number) {
   const panes: Record<string, WorkspaceTerminalPane> = {};
   for (const [paneId, panePayload] of Object.entries(payload)) {
     if (!isValidWorkspaceId(paneId) || !isObject(panePayload) || panePayload.id !== paneId || typeof panePayload.title !== "string" || typeof panePayload.detail !== "string" || typeof panePayload.status !== "string" || typeof panePayload.command !== "string" || !isPaneTone(panePayload.tone)) {
@@ -256,6 +258,7 @@ function parsePanes(payload: Record<string, unknown>) {
       command: panePayload.command,
       cwd: typeof panePayload.cwd === "string" && panePayload.cwd.length <= 4096 ? panePayload.cwd : "",
       detail: panePayload.detail,
+      fontSize: panePayload.fontSize === undefined ? defaultFontSize : parseTerminalFontSize(panePayload.fontSize),
       id: paneId,
       status: panePayload.status,
       title: panePayload.title.trim() || paneId,

@@ -125,15 +125,15 @@ function registerTerminalIpc() {
   ipcMain.handle(terminalChannels.paste, (event, idPayload: unknown) => {
     const id = parseTerminalId(idPayload);
     if (!id || !isTrustedSessionOwner(event, id)) {
-      return false;
+      return null;
     }
 
     const text = clipboard.readText();
     if (!text || text.length > MAX_TERMINAL_PASTE_LENGTH) {
-      return false;
+      return null;
     }
 
-    return terminalHost.write(id, text);
+    return text;
   });
   ipcMain.handle(terminalChannels.resize, (event, idPayload: unknown, colsPayload: unknown, rowsPayload: unknown) => {
     const id = parseTerminalId(idPayload);

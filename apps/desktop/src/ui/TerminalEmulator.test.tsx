@@ -11,6 +11,7 @@ const terminalHasSelectionMock = vi.fn(() => false);
 const terminalLoadAddonMock = vi.fn();
 const terminalWriteMock = vi.fn();
 const webglDisposeMock = vi.fn();
+let terminalBracketedPasteMode = true;
 let terminalConstructorOptions: unknown[] = [];
 let terminalOptionsUpdates: unknown[] = [];
 let customKeyHandler: ((event: KeyboardEvent) => boolean) | undefined;
@@ -43,6 +44,11 @@ vi.mock("@xterm/xterm", () => ({
       getSelection: terminalGetSelectionMock,
       hasSelection: terminalHasSelectionMock,
       loadAddon: terminalLoadAddonMock,
+      modes: {
+        get bracketedPasteMode() {
+          return terminalBracketedPasteMode;
+        },
+      },
       onData: vi.fn(() => ({ dispose: vi.fn() })),
       open: vi.fn(),
       rows: 24,
@@ -64,6 +70,7 @@ describe("TerminalEmulator", () => {
     contextLossHandler = undefined;
     terminalConstructorOptions = [];
     terminalOptionsUpdates = [];
+    terminalBracketedPasteMode = true;
     terminalGetSelectionMock.mockReturnValue("");
     terminalHasSelectionMock.mockReturnValue(false);
     window.agentDeck = createFakeBridge();
@@ -87,8 +94,8 @@ describe("TerminalEmulator", () => {
     expect(isTerminalKeyboardPasteShortcut({ key: "v", shiftKey: false })).toBe(false);
   });
 
-  test("lets Ctrl+V fall through to the DOM paste event", async () => {
-    const paste = vi.fn(() => Promise.resolve(true));
+  test("routes Ctrl+V through terminal-formatted paste", async () => {
+    const paste = vi.fn(() => Promise.resolve("pasted terminal text"));
     const write = vi.fn(() => Promise.resolve(true));
     window.agentDeck = createFakeBridge({ paste, write });
 
@@ -97,13 +104,13 @@ describe("TerminalEmulator", () => {
     await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
     const handled = customKeyHandler?.(new KeyboardEvent("keydown", { ctrlKey: true, key: "v" }));
 
-    expect(handled).toBe(true);
-    expect(paste).not.toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalled();
+    expect(handled).toBe(false);
+    expect(paste).toHaveBeenCalledWith("term-1");
+    await waitFor(() => expect(write).toHaveBeenCalledWith("term-1", "\x1b[200~pasted terminal text\x1b[201~"));
   });
 
   test("routes Shift+Insert through the terminal paste bridge", async () => {
-    const paste = vi.fn(() => Promise.resolve(true));
+    const paste = vi.fn(() => Promise.resolve("pasted terminal text"));
     const write = vi.fn(() => Promise.resolve(true));
     window.agentDeck = createFakeBridge({ paste, write });
 
@@ -114,7 +121,7 @@ describe("TerminalEmulator", () => {
 
     expect(handled).toBe(false);
     expect(paste).toHaveBeenCalledWith("term-1");
-    expect(write).not.toHaveBeenCalled();
+    await waitFor(() => expect(write).toHaveBeenCalledWith("term-1", "\x1b[200~pasted terminal text\x1b[201~"));
   });
 
   test("copies terminal selection through the terminal copy bridge", async () => {
@@ -148,7 +155,7 @@ describe("TerminalEmulator", () => {
   });
 
   test("routes DOM paste events through the terminal paste bridge", async () => {
-    const paste = vi.fn(() => Promise.resolve(true));
+    const paste = vi.fn(() => Promise.resolve("pasted terminal text"));
     const write = vi.fn(() => Promise.resolve(true));
     window.agentDeck = createFakeBridge({ paste, write });
 
@@ -160,7 +167,22 @@ describe("TerminalEmulator", () => {
 
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(paste).toHaveBeenCalledWith("term-1");
-    expect(write).not.toHaveBeenCalled();
+    await waitFor(() => expect(write).toHaveBeenCalledWith("term-1", "\x1b[200~pasted terminal text\x1b[201~"));
+  });
+
+  test("normalizes paste without brackets when bracketed paste is disabled", async () => {
+    const paste = vi.fn(() => Promise.resolve("first\nsecond"));
+    const write = vi.fn(() => Promise.resolve(true));
+    terminalBracketedPasteMode = false;
+    window.agentDeck = createFakeBridge({ paste, write });
+
+    render(<TerminalEmulator cwd="" onCwdChange={() => undefined} paneId="term-1" />);
+
+    await waitFor(() => expect(window.agentDeck?.terminal.createSession).toHaveBeenCalled());
+    const handled = customKeyHandler?.(new KeyboardEvent("keydown", { ctrlKey: true, key: "v" }));
+
+    expect(handled).toBe(false);
+    await waitFor(() => expect(write).toHaveBeenCalledWith("term-1", "first\rsecond"));
   });
 
   test("applies configured terminal font size and reports Ctrl wheel zoom", async () => {
@@ -272,7 +294,7 @@ function createFakeBridge(terminalOverrides: Partial<NonNullable<Window["agentDe
       onCwd: () => () => undefined,
       onData: () => () => undefined,
       onExit: () => () => undefined,
-      paste: () => Promise.resolve(true),
+      paste: () => Promise.resolve("pasted terminal text"),
       resize: () => Promise.resolve(true),
       write: () => Promise.resolve(true),
       ...terminalOverrides,

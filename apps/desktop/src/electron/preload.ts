@@ -54,7 +54,7 @@ const bridge: AgentDeckBridge = {
       ipcRenderer.on(terminalChannels.exit, handler);
       return () => ipcRenderer.off(terminalChannels.exit, handler);
     },
-    paste: (id: string) => ipcRenderer.invoke(terminalChannels.paste, id) as Promise<boolean>,
+    paste: (id: string) => ipcRenderer.invoke(terminalChannels.paste, id) as Promise<string | null>,
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke(terminalChannels.resize, id, cols, rows) as Promise<boolean>,
     write: (id: string, data: string) => ipcRenderer.invoke(terminalChannels.write, id, data) as Promise<boolean>,
   },

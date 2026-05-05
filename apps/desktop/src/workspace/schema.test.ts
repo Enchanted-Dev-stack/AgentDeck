@@ -15,6 +15,7 @@ const tab = {
       command: "shell",
       cwd: "D:\\projects\\AgentDeck",
       detail: "restored shell",
+      fontSize: 12,
       id: "term-1",
       status: "ready",
       title: "OpenCode",
@@ -79,6 +80,16 @@ describe("workspace schema", () => {
     });
     expect(parseWorkspaceDocument({ ...validDocument, settings: { sharedContextEnabled: true, terminalAppearance: {} } })).toMatchObject({
       settings: { terminalAppearance: { fontSize: 12 } },
+    });
+  });
+
+  test("inherits missing terminal pane font size from terminal appearance", () => {
+    expect(parseWorkspaceDocument({ ...validDocument, tabs: [{ ...tab, panes: { "term-1": { ...tab.panes["term-1"], fontSize: 100 } } }] })).toMatchObject({
+      tabs: [{ panes: { "term-1": { fontSize: 22 } } }],
+    });
+    const { fontSize: _fontSize, ...paneWithoutFontSize } = tab.panes["term-1"];
+    expect(parseWorkspaceDocument({ ...validDocument, settings: { ...validDocument.settings, terminalAppearance: { ...validDocument.settings.terminalAppearance, fontSize: 15 } }, tabs: [{ ...tab, panes: { "term-1": paneWithoutFontSize } }] })).toMatchObject({
+      tabs: [{ panes: { "term-1": { fontSize: 15 } } }],
     });
   });
 

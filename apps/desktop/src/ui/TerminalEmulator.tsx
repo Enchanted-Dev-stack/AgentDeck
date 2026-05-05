@@ -3,7 +3,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type IDisposable, type ITerminalAddon } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { getTerminalBridge } from "../terminal/bridge.js";
-import { isTerminalCopyShortcut, isTerminalKeyboardPasteShortcut } from "./terminalShortcuts.js";
+import { isTerminalCopyShortcut, isTerminalPasteShortcut } from "./terminalShortcuts.js";
 
 const DEFAULT_TERMINAL_FONT_FAMILY = "Cascadia Mono, JetBrains Mono, Consolas, monospace";
 const TERMINAL_RENDER_DIAGNOSTIC_EVENT = "agentdeck:terminal-render-diagnostic";
@@ -11,6 +11,8 @@ const TERMINAL_RENDER_OPTIONS_EVENT = "agentdeck:terminal-render-options";
 const DEFAULT_TERMINAL_FONT_SIZE = 12;
 const MIN_TERMINAL_FONT_SIZE = 9;
 const MAX_TERMINAL_FONT_SIZE = 22;
+const MAX_TERMINAL_WRITE_CHUNK_LENGTH = 16_000;
+const KEYBOARD_PASTE_DOM_SUPPRESSION_MS = 150;
 const TERMINAL_RENDER_DIAGNOSTIC_SAMPLE = [
   "\r\n\x1b[1;36mAgentDeck xterm render diagnostic\x1b[0m\r\n",
   "background cells: ",
@@ -66,6 +68,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
     }
 
     let disposed = false;
+    let lastKeyboardPasteAt = 0;
     let sessionCreated = false;
     let resizeTimer: number | undefined;
 
@@ -106,8 +109,9 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
         return true;
       }
 
-      if (event.type === "keydown" && isTerminalKeyboardPasteShortcut(event)) {
-        ignoreTerminalIpcError(bridge.paste(paneId));
+      if (event.type === "keydown" && isTerminalPasteShortcut(event)) {
+        lastKeyboardPasteAt = Date.now();
+        pasteFromClipboard(terminal, bridge, paneId);
         return false;
       }
 
@@ -116,9 +120,14 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
 
     const pasteFromEvent = (event: ClipboardEvent) => {
       event.preventDefault();
-      ignoreTerminalIpcError(bridge.paste(paneId));
+      event.stopPropagation();
+      if (Date.now() - lastKeyboardPasteAt < KEYBOARD_PASTE_DOM_SUPPRESSION_MS) {
+        return;
+      }
+
+      pasteFromClipboard(terminal, bridge, paneId);
     };
-    terminalElement.addEventListener("paste", pasteFromEvent);
+    terminalElement.addEventListener("paste", pasteFromEvent, { capture: true });
 
     const zoomFontFromWheel = (event: WheelEvent) => {
       if (!event.ctrlKey || event.deltaY === 0) {
@@ -189,7 +198,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
     };
 
     const inputDisposable = terminal.onData((data) => {
-      ignoreTerminalIpcError(bridge.write(paneId, data));
+      writeTerminalData(bridge, paneId, data);
     });
     const removeDataListener = bridge.onData((event) => {
       if (event.id === paneId) {
@@ -240,7 +249,7 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
       contextLossDisposable?.dispose();
       window.removeEventListener(TERMINAL_RENDER_OPTIONS_EVENT, updateRenderOptions);
       window.removeEventListener(TERMINAL_RENDER_DIAGNOSTIC_EVENT, writeRenderDiagnostic);
-      terminalElement.removeEventListener("paste", pasteFromEvent);
+      terminalElement.removeEventListener("paste", pasteFromEvent, { capture: true });
       terminalElement.removeEventListener("wheel", zoomFontFromWheel);
       terminalElement.removeEventListener("pointerdown", focusTerminal);
       removeCwdListener();
@@ -267,6 +276,25 @@ export function TerminalEmulator({ cwd, fontFamily = DEFAULT_TERMINAL_FONT_FAMIL
 
 export function clampTerminalFontSize(fontSize: number) {
   return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(fontSize)));
+}
+
+function pasteFromClipboard(terminal: Terminal, bridge: NonNullable<ReturnType<typeof getTerminalBridge>>, paneId: string) {
+  void bridge.paste(paneId).then((text) => {
+    if (text) {
+      writeTerminalData(bridge, paneId, formatTerminalPaste(text, terminal.modes.bracketedPasteMode));
+    }
+  }).catch(() => undefined);
+}
+
+export function formatTerminalPaste(text: string, bracketedPasteMode: boolean) {
+  const normalizedText = text.replace(/\r?\n/g, "\r");
+  return bracketedPasteMode ? `\x1b[200~${normalizedText}\x1b[201~` : normalizedText;
+}
+
+function writeTerminalData(bridge: NonNullable<ReturnType<typeof getTerminalBridge>>, paneId: string, data: string) {
+  for (let index = 0; index < data.length; index += MAX_TERMINAL_WRITE_CHUNK_LENGTH) {
+    ignoreTerminalIpcError(bridge.write(paneId, data.slice(index, index + MAX_TERMINAL_WRITE_CHUNK_LENGTH)));
+  }
 }
 
 function ignoreTerminalIpcError(request: Promise<boolean>) {

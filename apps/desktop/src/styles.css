@@ -755,6 +755,7 @@ button {
   color: #aab2bd;
   min-height: 0;
   overflow: hidden;
+  padding: 0 6px;
 }
 
 .terminal-emulator {

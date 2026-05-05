@@ -204,7 +204,7 @@ describe("App", () => {
                 id: "tab-9",
                 layout: { id: "term-9", type: "terminal" },
                 panes: {
-                  "term-9": { command: "shell", cwd: "D:\\imported", detail: "imported", id: "term-9", status: "ready", title: "Imported Shell", tone: "neutral" },
+                  "term-9": { command: "shell", cwd: "D:\\imported", detail: "imported", fontSize: 15, id: "term-9", status: "ready", title: "Imported Shell", tone: "neutral" },
                 },
                 title: "Imported Tab",
               },
@@ -248,7 +248,7 @@ describe("App", () => {
                 id: "tab-9",
                 layout: { id: "term-9", type: "terminal" },
                 panes: {
-                  "term-9": { command: "shell", cwd: "D:\\autosaved", detail: "autosaved", id: "term-9", status: "ready", title: "Restored Shell", tone: "neutral" },
+                  "term-9": { command: "shell", cwd: "D:\\autosaved", detail: "autosaved", fontSize: 16, id: "term-9", status: "ready", title: "Restored Shell", tone: "neutral" },
                 },
                 title: "Restored Tab",
               },
@@ -318,18 +318,35 @@ describe("App", () => {
     expect(workspace.className).toContain("terminal-workspace--no-borders");
   });
 
-  test("updates terminal font size from controls and Ctrl wheel", async () => {
+  test("uses default font size for new terminals and wheel zooms only the hovered terminal", async () => {
+    const savedDocuments: unknown[] = [];
+    const saveWorkspace = vi.fn((document: unknown) => {
+      savedDocuments.push(document);
+      return Promise.resolve(true);
+    });
+    window.agentDeck = createFakeBridge({ workspace: { autoLoadWorkspace: () => Promise.resolve(null), autoSaveWorkspace: () => Promise.resolve(true), importWorkspace: () => Promise.resolve(null), saveWorkspace } });
     const user = userEvent.setup();
     render(<App />);
 
     expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("12");
+    expect(screen.getByTestId("terminal-emulator-term-2").getAttribute("data-font-size")).toBe("12");
 
     await user.click(screen.getByRole("button", { name: "Terminal appearance" }));
     await user.click(screen.getByRole("button", { name: "Increase terminal font size" }));
-    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("13");
+    fireEvent.contextMenu(screen.getByLabelText("OpenCode terminal"), { clientX: 24, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Right" }));
+
+    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("12");
+    expect(screen.getByTestId("terminal-emulator-term-3").getAttribute("data-font-size")).toBe("13");
 
     fireEvent.wheel(screen.getByTestId("terminal-emulator-term-1"), { ctrlKey: true, deltaY: -100 });
-    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("14");
+    expect(screen.getByTestId("terminal-emulator-term-1").getAttribute("data-font-size")).toBe("13");
+    expect(screen.getByTestId("terminal-emulator-term-2").getAttribute("data-font-size")).toBe("12");
+    expect(screen.getByTestId("terminal-emulator-term-3").getAttribute("data-font-size")).toBe("13");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+    await waitFor(() => expect(saveWorkspace).toHaveBeenCalled());
+    expect(savedDocuments[0]).toMatchObject({ tabs: [expect.objectContaining({ panes: expect.objectContaining({ "term-1": expect.objectContaining({ fontSize: 13 }), "term-2": expect.objectContaining({ fontSize: 12 }), "term-3": expect.objectContaining({ fontSize: 13 }) }) })] });
   });
 
   test("saves terminal appearance with the workspace", async () => {
@@ -1004,7 +1021,7 @@ function createFakeBridge(overrides: Partial<NonNullable<Window["agentDeck"]>["t
       onCwd: () => () => undefined,
       onData: () => () => undefined,
       onExit: () => () => undefined,
-      paste: () => Promise.resolve(true),
+      paste: () => Promise.resolve("pasted terminal text"),
       resize: () => Promise.resolve(true),
       write: () => Promise.resolve(true),
       ...terminalOverrides,

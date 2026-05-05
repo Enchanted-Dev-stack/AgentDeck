@@ -33,6 +33,7 @@ interface TerminalPane {
   tone: "success" | "neutral" | "warn";
   command: string;
   cwd: string;
+  fontSize: number;
 }
 
 interface TerminalTab {
@@ -117,8 +118,8 @@ const mcpClients: Array<{ id: McpClient; label: string; description: string; con
 ];
 
 const initialTerminalPanes: Record<string, TerminalPane> = {
-  "term-1": { id: "term-1", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "running", tone: "success", command: "opencode .", cwd: "" },
-  "term-2": { id: "term-2", title: "Scratch", detail: "permissioned local commands", status: "ready", tone: "warn", command: "git status --short", cwd: "" },
+  "term-1": { id: "term-1", title: "OpenCode", detail: "agent shell · shared MCP armed", status: "running", tone: "success", command: "opencode .", cwd: "", fontSize: defaultTerminalAppearance.fontSize },
+  "term-2": { id: "term-2", title: "Scratch", detail: "permissioned local commands", status: "ready", tone: "warn", command: "git status --short", cwd: "", fontSize: defaultTerminalAppearance.fontSize },
 };
 
 export const initialSplitLayout: SplitNode = {
@@ -235,7 +236,7 @@ export function App() {
         layout: insertTerminalOnSide(currentTab.layout, targetIds, terminalId, side),
         panes: {
           ...currentTab.panes,
-          [terminalId]: createTerminalPane(terminalId, terminalIndex, terminalDefaultCwd),
+          [terminalId]: createTerminalPane(terminalId, terminalIndex, terminalDefaultCwd, terminalAppearance.fontSize),
         },
       };
 
@@ -280,7 +281,7 @@ export function App() {
     setTerminalState((currentState) => {
       const tabIndex = currentState.nextTabIndex;
       const terminalIndex = currentState.nextTerminalIndex;
-      const tab = createTerminalTab(`tab-${tabIndex}`, tabIndex, terminalIndex, terminalDefaultCwd);
+      const tab = createTerminalTab(`tab-${tabIndex}`, tabIndex, terminalIndex, terminalDefaultCwd, terminalAppearance.fontSize);
 
       return {
         ...currentState,
@@ -307,7 +308,7 @@ export function App() {
 
       const remainingTabs = currentState.tabs.filter((tab) => tab.id !== tabId);
       if (remainingTabs.length === 0) {
-        const tab = createTerminalTab("tab-1", 1, currentState.nextTerminalIndex, terminalDefaultCwd);
+        const tab = createTerminalTab("tab-1", 1, currentState.nextTerminalIndex, terminalDefaultCwd, terminalAppearance.fontSize);
         return {
           ...currentState,
           activeTabId: tab.id,
@@ -366,7 +367,7 @@ export function App() {
                 panes: {
                   ...tab.panes,
                   [terminalId]: {
-                    ...(tab.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex, terminalDefaultCwd)),
+                    ...(tab.panes[terminalId] ?? createTerminalPane(terminalId, currentState.nextTerminalIndex, terminalDefaultCwd, terminalAppearance.fontSize)),
                     title: nextTitle,
                   },
                 },
@@ -646,6 +647,30 @@ export function App() {
     });
   }
 
+  function updateTerminalFontSize(terminalId: string, fontSize: number) {
+    const nextFontSize = clampTerminalFontSize(fontSize);
+    setTerminalState((currentState) => {
+      let changed = false;
+      const tabs = currentState.tabs.map((tab) => {
+        const pane = tab.panes[terminalId];
+        if (!pane || pane.fontSize === nextFontSize) {
+          return tab;
+        }
+
+        changed = true;
+        return {
+          ...tab,
+          panes: {
+            ...tab.panes,
+            [terminalId]: { ...pane, fontSize: nextFontSize },
+          },
+        };
+      });
+
+      return changed ? { ...currentState, tabs } : currentState;
+    });
+  }
+
   function selectTerminal(terminalId: string, rangeSelect: boolean) {
     if (!rangeSelect || !selectionAnchorId) {
       setSelectionAnchorId(terminalId);
@@ -741,6 +766,7 @@ export function App() {
                   onRemoveTerminals={removeTerminals}
                   onSelectTerminal={selectTerminal}
                   onTerminalCwdChange={updateTerminalCwd}
+                  onTerminalFontSizeChange={updateTerminalFontSize}
                   panes={tab.panes}
                   selectedTerminalIds={isActiveTab ? selectedTerminalIds : new Set()}
                 />
@@ -882,6 +908,7 @@ function TerminalWorkspace({
   onRemoveTerminals,
   onSelectTerminal,
   onTerminalCwdChange,
+  onTerminalFontSizeChange,
   onToggleAppearancePanel,
   onUpdateAppearance,
   onSelectTerminalDefaultCwd,
@@ -908,6 +935,7 @@ function TerminalWorkspace({
   onRemoveTerminals: (terminalIds: string[]) => void;
   onSelectTerminal: (terminalId: string, additive: boolean) => void;
   onTerminalCwdChange: (terminalId: string, cwd: string) => void;
+  onTerminalFontSizeChange: (terminalId: string, fontSize: number) => void;
   onToggleAppearancePanel: () => void;
   onUpdateAppearance: (appearance: Partial<WorkspaceTerminalAppearance>) => void;
   onSelectTerminalDefaultCwd: () => Promise<void>;
@@ -948,7 +976,7 @@ function TerminalWorkspace({
         appearance={appearance}
         onOpenTerminalMenu={onOpenTerminalMenu}
         onSelectTerminal={onSelectTerminal}
-        onFontSizeChange={(fontSize) => onUpdateAppearance({ fontSize })}
+        onFontSizeChange={onTerminalFontSizeChange}
         onTerminalCwdChange={onTerminalCwdChange}
         panes={panes}
         rootLayout={layout}
@@ -996,7 +1024,7 @@ function TerminalAppearanceControl({ appearance, isOpen, onDismiss, onSelectTerm
             </div>
           </fieldset>
           <fieldset>
-            <legend className="terminal-appearance__label">Font size</legend>
+            <legend className="terminal-appearance__label">Default font size</legend>
             <div className="terminal-appearance__stepper" aria-label="Terminal font size">
               <button aria-label="Decrease terminal font size" disabled={appearance.fontSize <= MIN_TERMINAL_FONT_SIZE} onClick={() => onUpdateAppearance({ fontSize: appearance.fontSize - 1 })} type="button">
                 -
@@ -1088,7 +1116,7 @@ function SplitView({
   appearance: WorkspaceTerminalAppearance;
   node: SplitNode;
   onLayoutChange: (layout: SplitNode) => void;
-  onFontSizeChange: (fontSize: number) => void;
+  onFontSizeChange: (terminalId: string, fontSize: number) => void;
   onOpenTerminalMenu: (terminalId: string, position: MenuPosition) => void;
   onSelectTerminal: (terminalId: string, additive: boolean) => void;
   onTerminalCwdChange: (terminalId: string, cwd: string) => void;
@@ -1098,7 +1126,8 @@ function SplitView({
   selectedTerminalIds: Set<string>;
 }) {
   if (node.type === "terminal") {
-    return <TerminalPaneView fontFamily={terminalFontFamilies[appearance.font]} fontSize={appearance.fontSize} isSelected={selectedTerminalIds.has(node.id)} key={`${sessionRevision}:${node.id}`} onCwdChange={onTerminalCwdChange} onFontSizeChange={onFontSizeChange} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={panes[node.id]} />;
+    const pane = panes[node.id];
+    return <TerminalPaneView fontFamily={terminalFontFamilies[appearance.font]} fontSize={pane?.fontSize ?? appearance.fontSize} isSelected={selectedTerminalIds.has(node.id)} key={`${sessionRevision}:${node.id}`} onCwdChange={onTerminalCwdChange} onFontSizeChange={onFontSizeChange} onOpenMenu={onOpenTerminalMenu} onSelect={onSelectTerminal} pane={pane} />;
   }
 
   return (
@@ -1197,7 +1226,7 @@ function ResizeSash({
   );
 }
 
-function TerminalPaneView({ fontFamily, fontSize, isSelected, onCwdChange, onFontSizeChange, onOpenMenu, onSelect, pane }: { fontFamily: string; fontSize: number; isSelected: boolean; onCwdChange: (terminalId: string, cwd: string) => void; onFontSizeChange: (fontSize: number) => void; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
+function TerminalPaneView({ fontFamily, fontSize, isSelected, onCwdChange, onFontSizeChange, onOpenMenu, onSelect, pane }: { fontFamily: string; fontSize: number; isSelected: boolean; onCwdChange: (terminalId: string, cwd: string) => void; onFontSizeChange: (terminalId: string, fontSize: number) => void; onOpenMenu: (terminalId: string, position: MenuPosition) => void; onSelect: (terminalId: string, additive: boolean) => void; pane: TerminalPane | undefined }) {
   if (!pane) {
     return null;
   }
@@ -1249,7 +1278,7 @@ function TerminalPaneView({ fontFamily, fontSize, isSelected, onCwdChange, onFon
         </span>
       </header>
       <div className="terminal-pane__body">
-        <TerminalEmulator cwd={terminalPane.cwd} fontFamily={fontFamily} fontSize={fontSize} onCwdChange={(cwd) => onCwdChange(terminalPane.id, cwd)} onFontSizeChange={onFontSizeChange} paneId={terminalPane.id} />
+        <TerminalEmulator cwd={terminalPane.cwd} fontFamily={fontFamily} fontSize={fontSize} onCwdChange={(cwd) => onCwdChange(terminalPane.id, cwd)} onFontSizeChange={(nextFontSize) => onFontSizeChange(terminalPane.id, nextFontSize)} paneId={terminalPane.id} />
       </div>
     </article>
   );
@@ -1521,11 +1550,12 @@ export function removeTerminalFromLayout(layout: SplitNode | null, terminalId: s
   };
 }
 
-function createTerminalPane(id: string, index: number, defaultCwd = ""): TerminalPane {
+function createTerminalPane(id: string, index: number, defaultCwd = "", fontSize = defaultTerminalAppearance.fontSize): TerminalPane {
   return {
     command: "shell",
     cwd: defaultCwd,
     detail: "new local terminal",
+    fontSize: clampTerminalFontSize(fontSize),
     id,
     status: "ready",
     title: `Terminal ${index}`,
@@ -1533,13 +1563,13 @@ function createTerminalPane(id: string, index: number, defaultCwd = ""): Termina
   };
 }
 
-function createTerminalTab(id: string, tabIndex: number, terminalIndex: number, defaultCwd = ""): TerminalTab {
+function createTerminalTab(id: string, tabIndex: number, terminalIndex: number, defaultCwd = "", fontSize = defaultTerminalAppearance.fontSize): TerminalTab {
   const terminalId = `term-${terminalIndex}`;
   return {
     id,
     layout: { type: "terminal", id: terminalId },
     panes: {
-      [terminalId]: createTerminalPane(terminalId, terminalIndex, defaultCwd),
+      [terminalId]: createTerminalPane(terminalId, terminalIndex, defaultCwd, fontSize),
     },
     title: `Tab ${tabIndex}`,
   };

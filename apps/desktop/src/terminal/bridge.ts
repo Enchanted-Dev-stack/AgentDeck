@@ -95,7 +95,7 @@ export interface TerminalBridge {
   onCwd: (listener: (event: TerminalCwdEvent) => void) => () => void;
   onData: (listener: (event: TerminalDataEvent) => void) => () => void;
   onExit: (listener: (event: TerminalExitEvent) => void) => () => void;
-  paste: (id: string) => Promise<boolean>;
+  paste: (id: string) => Promise<string | null>;
   resize: (id: string, cols: number, rows: number) => Promise<boolean>;
   write: (id: string, data: string) => Promise<boolean>;
 }
